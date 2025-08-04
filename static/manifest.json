@@ -1,0 +1,32 @@
+{
+  "name": "Pothole Detector - Smart Road Monitoring",
+  "short_name": "PotholeDetector",
+  "description": "Advanced Progressive Web App for real-time pothole detection using device sensors, GPS tracking, and voice confirmation",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1f2937",
+  "theme_color": "#667eea",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["utilities", "navigation", "productivity"],
+  "permissions": ["accelerometer", "geolocation", "microphone"],
+  "screenshots": [
+    {
+      "src": "/favicon.png",
+      "sizes": "540x720",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ]
+}

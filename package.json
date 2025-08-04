@@ -1,6 +1,7 @@
 {
-	"name": "svelte-starter",
-	"version": "0.0.1",
+	"name": "pothole-detector-pwa",
+	"version": "1.0.0",
+	"description": "Progressive Web App for detecting potholes while driving",
 	"private": true,
 	"scripts": {
 		"dev": "vite dev",

@@ -1,98 +1,106 @@
-# Prisma Accelerate Example: Sveltekit Starter
+# Pothole Detector PWA
 
-## Introduction
-The quote generator retrieves the most recently added quote with and without caching enabled from a predefined set of quotes. In the context of your Sveltekit application, the quote generator is a service that provides quotes, with some caching strategies applied to optimize performance and reduce the load on the database.
+A Progressive Web App designed to log driving data for pothole detection using Svelte and Tailwind CSS.
 
-## General Steps of the Quote Generator:
-- Fetch a quote: Retrieves the most recently added quote with and without caching enabled.
-- Apply caching strategy: Depending on the request, it may apply different caching strategies (e.g., TTL, SWR, TTL+SWR or no caching).
-- Return the quote: The selected quote is returned, along with metadata about the caching status and other relevant information.
+## Features
 
-This project showcases how to use Prisma ORM with Prisma Accelerate in a Sveltekit application. It [demonstrates](./src/routes/api/quotes/+server.ts#L18-33) every available [caching strategy in Accelerate](https://www.prisma.io/docs/accelerate/caching#cache-strategies).
+### Core Functionality
+- **Session Management**: Start/End Session buttons to control data logging periods
+- **Accelerometer Detection**: Uses phone's accelerometer to detect vertical jolts that signify potential potholes
+- **Speed Monitoring**: Records vehicle speed using the Geolocation API
+- **Voice Confirmation**: Web Speech API allows users to verbally confirm pothole events by saying "pothole"
+- **Data Logging**: All significant events logged with timestamp, sensor readings, speed, and labels
+- **Auto Export**: Automatically downloads collected data as JSON-formatted .txt file at session end
 
-## Prerequisites
+### Progressive Web App Features
+- **Offline Capability**: Service worker enables offline functionality
+- **Mobile-First Design**: Responsive design optimized for mobile devices
+- **Install Prompt**: Can be installed on mobile devices as a native-like app
+- **Real-time Monitoring**: Live display of current sensor readings and session statistics
 
-To successfully run the project, you will need the following:
+## Getting Started
 
-- The **connection string** of a publicly accessible database
-- Your **Accelerate connection string** (containing your **Accelerate API key**) which you can get by enabling Accelerate in a project in your [Prisma Data Platform](https://pris.ly/pdp) account (learn more in the [docs](https://www.prisma.io/docs/platform/about#api-keys))
+### Prerequisites
+- Node.js 18+
+- Modern web browser with sensor API support
+- HTTPS (required for sensor APIs to work)
 
-## Getting started
+### Installation
 
-### 1. Clone the repository
-
-Clone the repository, navigate into it and install dependencies:
-
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd pothole-detector-svelte
 ```
-git clone git@github.com:prisma/prisma-examples.git --depth=1
-cd prisma-examples/accelerate/svelte-starter
+
+2. Install dependencies:
+```bash
 npm install
 ```
 
-### 2. Configure environment variables
-
-Create a `.env` in the root of the project directory:
-
+3. Start the development server:
 ```bash
-touch .env
-```
-
-Now, open the `.env` file and set the `DATABASE_URL` and `DIRECT_URL` environment variables with the values of your connection string and your Accelerate connection string:
-
-```bash
-# .env
-
-# Accelerate connection string (used for queries by Prisma Client)
-DATABASE_URL="__YOUR_ACCELERATE_CONNECTION_STRING__"
-
-# Database connection string (used for migrations by Prisma Migrate)
-DIRECT_URL="__YOUR_DATABASE_CONNECTION_STRING__"
-
-VITE_PUBLIC_URL="http://localhost:5173"
-```
-
-Note that `__YOUR_DATABASE_CONNECTION_STRING__` and `__YOUR_ACCELERATE_CONNECTION_STRING__` are placeholder values that you need to replace with the values of your database and Accelerate connection strings. Notice that the Accelerate connection string has the following structure: `prisma://accelerate.prisma-data.net/?api_key=__YOUR_ACCELERATE_API_KEY__`.
-
-### 3. Run a migration to create the `Quotes` table and seed the database
-
-The Prisma schema file contains a single `Quotes` model. You can map this model to the database and create the corresponding `Quotes` table using the following command:
-
-```
-npx prisma migrate dev --name init
-```
-
-You now have an empty `Quotes` table in your database. Next, run the [seed script](./prisma/seed.ts) to create some sample records in the table:
-
-```
- npx prisma db seed
-```
-
-### 4. Generate Prisma Client for Accelerate
-
-When using Accelerate, Prisma Client doesn't need a query engine. That's why you should generate it as follows:
-
-```
-npx prisma generate --no-engine
-```
-
-### 5. Start the app
-
-You can run the app with the following command:
-
-```
 npm run dev
 ```
 
-You will now be able to retrieve the most recently added quote with and without caching enabled along with some stats.
+4. Open your browser and navigate to `http://localhost:5173`
 
-![Screenshot](./demo.gif)
+### Building for Production
 
-## Resources
+```bash
+npm run build
+npm run preview
+```
 
-- [Accelerate Speed Test](https://accelerate-speed-test.vercel.app/)
-- [Accelerate documentation](https://www.prisma.io/docs/accelerate)
-- Check out the [Prisma docs](https://www.prisma.io/docs)
-- [Join our community on Discord](https://pris.ly/discord?utm_source=github&utm_medium=prisma_examples&utm_content=next_steps_section) to share feedback and interact with other users.
-- [Subscribe to our YouTube channel](https://pris.ly/youtube?utm_source=github&utm_medium=prisma_examples&utm_content=next_steps_section) for live demos and video tutorials.
-- [Follow us on X](https://pris.ly/x?utm_source=github&utm_medium=prisma_examples&utm_content=next_steps_section) for the latest updates.
-- Report issues or ask [questions on GitHub](https://pris.ly/github?utm_source=github&utm_medium=prisma_examples&utm_content=next_steps_section).
+## Usage
+
+1. **Grant Permissions**: On first use, grant access to device sensors (accelerometer, GPS, microphone)
+2. **Start Session**: Tap "Start Session" before beginning your drive
+3. **Drive Normally**: Keep your phone stable while driving
+4. **Voice Confirmation**: Say "pothole" within 5 seconds of a detected event to confirm it
+5. **End Session**: Tap "End Session" to stop logging and automatically download data
+6. **Review Data**: Open the downloaded JSON file to analyze detected events
+
+## Data Format
+
+The exported data includes:
+- Session metadata (start/end times, total distance, average speed)
+- Individual events with:
+  - Timestamp
+  - Accelerometer readings (x, y, z)
+  - GPS coordinates and speed
+  - Event severity (low/medium/high)
+  - Voice confirmation status
+  - Event label (detected/confirmed/false_positive)
+
+## Browser Compatibility
+
+- **Chrome/Edge**: Full support
+- **Firefox**: Partial support (no speech recognition)
+- **Safari**: iOS 13+ required for device motion permissions
+
+## Permissions Required
+
+- **Motion Sensors**: For accelerometer data
+- **Location**: For GPS coordinates and speed
+- **Microphone**: For voice confirmation feature
+
+## Technical Details
+
+- Built with SvelteKit and TypeScript
+- Styled with Tailwind CSS
+- Service Worker for PWA functionality
+- Real-time sensor data processing
+- Automatic data export in JSON format
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly on mobile devices
+5. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details
