@@ -178,7 +178,7 @@
 
   function confirmPothole(eventId: string) {
     if (!currentSession) return;
-    
+
     const event = currentSession.events.find(e => e.id === eventId);
     if (event) {
       event.userConfirmed = true;
@@ -191,7 +191,7 @@
 
   function markFalsePositive(eventId: string) {
     if (!currentSession) return;
-    
+
     const event = currentSession.events.find(e => e.id === eventId);
     if (event) {
       event.userConfirmed = false;
@@ -377,90 +377,133 @@
         </div>
       </div>
 
-      <!-- Events Ribbon -->
+      <!-- Events Timeline -->
       {#if currentSession && currentSession.events.length > 0}
         <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-t border-gray-600">
           <h2 class="text-xl font-bold mb-4 text-white flex items-center">
             <svg class="w-6 h-6 mr-2 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
             </svg>
-            Detected Events ({currentSession.events.length})
+            Event Timeline ({currentSession.events.length})
           </h2>
-          
-          <div class="max-h-80 overflow-y-auto space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
-            {#each [...currentSession.events].reverse() as event (event.id)}
-              <div class="border-2 rounded-xl p-4 transition-all duration-200 {getEventStatusColor(event)}">
-                <!-- Event Header -->
-                <div class="flex items-center justify-between mb-3">
-                  <div class="flex items-center space-x-2">
-                    <div class="w-3 h-3 rounded-full bg-gradient-to-r {getSeverityColor(event.severity)}"></div>
-                    <span class="text-white font-semibold capitalize">{event.severity} Severity</span>
-                  </div>
-                  <span class="text-gray-400 text-xs">
-                    {new Date(event.timestamp).toLocaleTimeString()}
-                  </span>
-                </div>
 
-                <!-- Event Details -->
-                <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-                  <div class="bg-black bg-opacity-20 rounded-lg p-2">
-                    <div class="text-gray-400 text-xs">Speed</div>
-                    <div class="text-white font-mono">
-                      {event.speed ? `${Math.round(event.speed * 3.6)} km/h` : 'N/A'}
-                    </div>
-                  </div>
-                  <div class="bg-black bg-opacity-20 rounded-lg p-2">
-                    <div class="text-gray-400 text-xs">Magnitude</div>
-                    <div class="text-white font-mono">
-                      {Math.sqrt(event.accelerometer.x**2 + event.accelerometer.y**2 + event.accelerometer.z**2).toFixed(1)} m/s²
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Confirmation Buttons -->
-                {#if event.userConfirmed === null}
-                  <div class="flex space-x-2">
-                    <button
-                      on:click={() => confirmPothole(event.id)}
-                      class="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2 px-4 rounded-lg text-sm font-semibold hover:from-green-600 hover:to-emerald-600 transition-all duration-200 flex items-center justify-center"
-                    >
-                      <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                      </svg>
-                      Confirm Pothole
-                    </button>
-                    <button
-                      on:click={() => markFalsePositive(event.id)}
-                      class="flex-1 bg-gradient-to-r from-red-500 to-rose-500 text-white py-2 px-4 rounded-lg text-sm font-semibold hover:from-red-600 hover:to-rose-600 transition-all duration-200 flex items-center justify-center"
-                    >
-                      <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                      </svg>
-                      False Positive
-                    </button>
-                  </div>
-                {:else}
-                  <!-- Confirmation Status -->
-                  <div class="flex items-center justify-center py-2">
-                    {#if event.userConfirmed}
-                      <div class="flex items-center text-green-400">
-                        <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+          <div class="relative max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+            <!-- Vertical Timeline Line -->
+            <div class="absolute left-6 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-400 via-cyan-400 to-blue-600"></div>
+            
+            <div class="space-y-4 pb-4">
+              {#each [...currentSession.events].reverse() as event, index (event.id)}
+                <div class="relative flex items-start space-x-4">
+                  <!-- Timeline Node -->
+                  <div class="flex-shrink-0 relative z-10">
+                    <div class="w-12 h-12 rounded-full flex items-center justify-center border-4
+                      {event.userConfirmed === true ? 'bg-green-500 border-green-400' :
+                       event.userConfirmed === false ? 'bg-red-500 border-red-400' :
+                       'bg-yellow-500 border-yellow-400'}
+                      shadow-lg">
+                      {#if event.userConfirmed === true}
+                        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
                           <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                         </svg>
-                        <span class="font-semibold">Confirmed Pothole</span>
-                      </div>
-                    {:else}
-                      <div class="flex items-center text-red-400">
-                        <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      {:else if event.userConfirmed === false}
+                        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
                           <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
                         </svg>
-                        <span class="font-semibold">Marked as False Positive</span>
-                      </div>
-                    {/if}
+                      {:else}
+                        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                        </svg>
+                      {/if}
+                    </div>
+                    
+                    <!-- Severity Indicator -->
+                    <div class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gradient-to-r {getSeverityColor(event.severity)} border-2 border-gray-800"></div>
                   </div>
-                {/if}
-              </div>
-            {/each}
+
+                  <!-- Event Content -->
+                  <div class="flex-1 min-w-0">
+                    <div class="bg-gray-700 bg-opacity-60 backdrop-blur-sm rounded-xl p-4 border border-gray-600 shadow-lg">
+                      <!-- Event Header -->
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center space-x-2">
+                          <span class="text-white font-semibold capitalize text-sm">Event #{currentSession.events.length - index}</span>
+                          <span class="text-xs px-2 py-1 rounded-full bg-gradient-to-r {getSeverityColor(event.severity)} text-white font-medium">
+                            {event.severity.toUpperCase()}
+                          </span>
+                        </div>
+                        <span class="text-gray-400 text-xs">
+                          {new Date(event.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+
+                      <!-- Event Details -->
+                      <div class="grid grid-cols-2 gap-2 mb-3 text-xs">
+                        <div class="bg-black bg-opacity-30 rounded-lg p-2">
+                          <div class="text-gray-400">Speed</div>
+                          <div class="text-white font-mono">
+                            {event.speed ? `${Math.round(event.speed * 3.6)} km/h` : 'N/A'}
+                          </div>
+                        </div>
+                        <div class="bg-black bg-opacity-30 rounded-lg p-2">
+                          <div class="text-gray-400">Force</div>
+                          <div class="text-white font-mono">
+                            {Math.sqrt(event.accelerometer.x**2 + event.accelerometer.y**2 + event.accelerometer.z**2).toFixed(1)} m/s²
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Confirmation Section -->
+                      {#if event.userConfirmed === null}
+                        <div class="space-y-2">
+                          <div class="text-center text-yellow-300 text-sm font-medium mb-2">
+                            🤔 Requires Confirmation
+                          </div>
+                          <div class="flex space-x-2">
+                            <button
+                              on:click={() => confirmPothole(event.id)}
+                              class="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2 px-3 rounded-lg text-xs font-semibold hover:from-green-600 hover:to-emerald-600 transition-all duration-200 flex items-center justify-center"
+                            >
+                              <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                              </svg>
+                              Pothole
+                            </button>
+                            <button
+                              on:click={() => markFalsePositive(event.id)}
+                              class="flex-1 bg-gradient-to-r from-red-500 to-rose-500 text-white py-2 px-3 rounded-lg text-xs font-semibold hover:from-red-600 hover:to-rose-600 transition-all duration-200 flex items-center justify-center"
+                            >
+                              <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                              </svg>
+                              False
+                            </button>
+                          </div>
+                        </div>
+                      {:else}
+                        <!-- Confirmation Status -->
+                        <div class="text-center py-2">
+                          {#if event.userConfirmed}
+                            <div class="flex items-center justify-center text-green-400 text-sm">
+                              <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                              </svg>
+                              <span class="font-semibold">✅ Confirmed Pothole</span>
+                            </div>
+                          {:else}
+                            <div class="flex items-center justify-center text-red-400 text-sm">
+                              <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                              </svg>
+                              <span class="font-semibold">❌ False Positive</span>
+                            </div>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {/each}
+            </div>
           </div>
         </div>
       {/if}
