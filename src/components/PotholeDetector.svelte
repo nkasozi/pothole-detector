@@ -10,16 +10,18 @@
   let permissionsGranted = false;
   let permissionDetails = {
     accelerometer: false,
-    location: false,
-    microphone: false
+    location: false
   };
 
   // Current readings
   let currentAccelerometer: AccelerometerReading | null = null;
   let currentLocation: LocationData | null = null;
-  let currentSpeed = 0; // km/h  // Session stats
+  let currentSpeed = 0; // km/h
+
+  // Session stats
   let eventsCount = 0;
   let confirmedPotholes = 0;
+  let falsePositives = 0;
   let sessionDuration = '00:00:00';
   let totalDistance = 0; // km
 
@@ -57,23 +59,15 @@
     // Update permission details for better user feedback
     permissionDetails = {
       accelerometer: sensorManager.accelerometerPermission,
-      location: sensorManager.locationPermission,
-      microphone: sensorManager.microphonePermission
+      location: sensorManager.locationPermission
     };
 
     if (!permissionsGranted) {
-      // Show more specific feedback about what's missing
-      const missingPerms = [];
-      if (!permissionDetails.accelerometer) missingPerms.push('Motion sensors');
-      if (!permissionDetails.location) missingPerms.push('Location');
-      if (!permissionDetails.microphone) missingPerms.push('Microphone');
-
-      alert(`Core functionality requires motion sensors. Optional features may be limited without: ${missingPerms.join(', ')}`);
+      alert('Motion sensor access is required for pothole detection. Please grant permissions first.');
     }
   }
 
   function startSession() {
-    // Allow starting session with just accelerometer permission
     if (!permissionDetails.accelerometer && !permissionsGranted) {
       alert('Motion sensor access is required for pothole detection. Please grant permissions first.');
       return;
@@ -93,6 +87,7 @@
 
     eventsCount = 0;
     confirmedPotholes = 0;
+    falsePositives = 0;
     totalDistance = 0;
 
     // Start session timer
@@ -101,7 +96,6 @@
     // Start sensors
     sensorManager.startAccelerometer(handleAccelerometerData);
     sensorManager.startLocationTracking(handleLocationData);
-    sensorManager.startSpeechRecognition(handleSpeechInput);
   }
 
   function stopSession() {
@@ -145,7 +139,7 @@
         location: currentLocation,
         speed: currentLocation.speed,
         label: 'pothole_detected',
-        voiceConfirmed: false,
+        userConfirmed: null, // Not yet confirmed
         severity: calculateSeverity(reading)
       };
 
@@ -182,15 +176,29 @@
     lastLocation = location;
   }
 
-  function handleSpeechInput(transcript: string) {
-    if (transcript.includes('pothole') && currentSession && currentSession.events.length > 0) {
-      // Mark the most recent event as voice confirmed
-      const lastEvent = currentSession.events[currentSession.events.length - 1];
-      if (lastEvent.timestamp > Date.now() - 5000) { // Within last 5 seconds
-        lastEvent.voiceConfirmed = true;
-        lastEvent.label = 'pothole_confirmed';
-        confirmedPotholes++;
-      }
+  function confirmPothole(eventId: string) {
+    if (!currentSession) return;
+    
+    const event = currentSession.events.find(e => e.id === eventId);
+    if (event) {
+      event.userConfirmed = true;
+      event.label = 'pothole_confirmed';
+      confirmedPotholes++;
+      // Trigger reactivity
+      currentSession.events = [...currentSession.events];
+    }
+  }
+
+  function markFalsePositive(eventId: string) {
+    if (!currentSession) return;
+    
+    const event = currentSession.events.find(e => e.id === eventId);
+    if (event) {
+      event.userConfirmed = false;
+      event.label = 'false_positive';
+      falsePositives++;
+      // Trigger reactivity
+      currentSession.events = [...currentSession.events];
     }
   }
 
@@ -212,8 +220,22 @@
   function formatCoordinate(value: number): string {
     return value.toFixed(6);
   }
-</script>
 
+  function getSeverityColor(severity: string): string {
+    switch (severity) {
+      case 'high': return 'from-red-500 to-red-600';
+      case 'medium': return 'from-orange-500 to-orange-600';
+      case 'low': return 'from-yellow-500 to-yellow-600';
+      default: return 'from-gray-500 to-gray-600';
+    }
+  }
+
+  function getEventStatusColor(event: PotholeEvent): string {
+    if (event.userConfirmed === true) return 'border-green-500 bg-green-900 bg-opacity-30';
+    if (event.userConfirmed === false) return 'border-red-500 bg-red-900 bg-opacity-30';
+    return 'border-yellow-500 bg-yellow-900 bg-opacity-20';
+  }
+</script>
 <div class="min-h-screen bg-gradient-to-br from-gray-900 via-slate-800 to-gray-900 p-2 md:p-4 flex items-start md:items-center justify-center md:py-8">
   <div class="w-full max-w-md bg-gray-800 backdrop-blur-sm bg-opacity-90 rounded-2xl shadow-2xl overflow-hidden border border-gray-700 md:max-h-[90vh] md:overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
     <!-- Header -->
@@ -234,7 +256,7 @@
       </div>
     </div>
 
-        <!-- Permissions Section -->
+    <!-- Permissions Section -->
     {#if !permissionsGranted}
       <div class="p-6 bg-gradient-to-br from-slate-700 via-gray-700 to-slate-800 border-l-4 border-blue-500">
         <div class="flex items-start">
@@ -288,19 +310,11 @@
                 {permissionDetails.location ? 'Active' : 'Limited'}
               </span>
             </div>
-            <div class="flex items-center justify-between p-2 bg-black bg-opacity-20 rounded-lg">
-              <span class="flex items-center">
-                <div class="w-3 h-3 rounded-full mr-3 {permissionDetails.microphone ? 'bg-emerald-400' : 'bg-yellow-400'}"></div>
-                <span class="text-emerald-100">Microphone</span>
-              </span>
-              <span class="text-xs px-2 py-1 rounded-full {permissionDetails.microphone ? 'bg-emerald-600 text-emerald-100' : 'bg-yellow-600 text-yellow-100'}">
-                {permissionDetails.microphone ? 'Active' : 'Limited'}
-              </span>
-            </div>
           </div>
         </div>
       </div>
-    {/if}        <!-- Session Controls -->
+    {/if}
+
     <!-- Session Controls -->
     <div class="p-6">
       <div class="space-y-4">
@@ -362,10 +376,96 @@
           </div>
         </div>
       </div>
-    {/if}
 
-    <!-- Current Readings -->
-    {#if sessionStatus === 'active'}
+      <!-- Events Ribbon -->
+      {#if currentSession && currentSession.events.length > 0}
+        <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-t border-gray-600">
+          <h2 class="text-xl font-bold mb-4 text-white flex items-center">
+            <svg class="w-6 h-6 mr-2 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
+            </svg>
+            Detected Events ({currentSession.events.length})
+          </h2>
+          
+          <div class="max-h-80 overflow-y-auto space-y-3 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+            {#each [...currentSession.events].reverse() as event (event.id)}
+              <div class="border-2 rounded-xl p-4 transition-all duration-200 {getEventStatusColor(event)}">
+                <!-- Event Header -->
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center space-x-2">
+                    <div class="w-3 h-3 rounded-full bg-gradient-to-r {getSeverityColor(event.severity)}"></div>
+                    <span class="text-white font-semibold capitalize">{event.severity} Severity</span>
+                  </div>
+                  <span class="text-gray-400 text-xs">
+                    {new Date(event.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+
+                <!-- Event Details -->
+                <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+                  <div class="bg-black bg-opacity-20 rounded-lg p-2">
+                    <div class="text-gray-400 text-xs">Speed</div>
+                    <div class="text-white font-mono">
+                      {event.speed ? `${Math.round(event.speed * 3.6)} km/h` : 'N/A'}
+                    </div>
+                  </div>
+                  <div class="bg-black bg-opacity-20 rounded-lg p-2">
+                    <div class="text-gray-400 text-xs">Magnitude</div>
+                    <div class="text-white font-mono">
+                      {Math.sqrt(event.accelerometer.x**2 + event.accelerometer.y**2 + event.accelerometer.z**2).toFixed(1)} m/s²
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Confirmation Buttons -->
+                {#if event.userConfirmed === null}
+                  <div class="flex space-x-2">
+                    <button
+                      on:click={() => confirmPothole(event.id)}
+                      class="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2 px-4 rounded-lg text-sm font-semibold hover:from-green-600 hover:to-emerald-600 transition-all duration-200 flex items-center justify-center"
+                    >
+                      <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                      </svg>
+                      Confirm Pothole
+                    </button>
+                    <button
+                      on:click={() => markFalsePositive(event.id)}
+                      class="flex-1 bg-gradient-to-r from-red-500 to-rose-500 text-white py-2 px-4 rounded-lg text-sm font-semibold hover:from-red-600 hover:to-rose-600 transition-all duration-200 flex items-center justify-center"
+                    >
+                      <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                      </svg>
+                      False Positive
+                    </button>
+                  </div>
+                {:else}
+                  <!-- Confirmation Status -->
+                  <div class="flex items-center justify-center py-2">
+                    {#if event.userConfirmed}
+                      <div class="flex items-center text-green-400">
+                        <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                        </svg>
+                        <span class="font-semibold">Confirmed Pothole</span>
+                      </div>
+                    {:else}
+                      <div class="flex items-center text-red-400">
+                        <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                        </svg>
+                        <span class="font-semibold">Marked as False Positive</span>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Current Readings -->
       <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-t border-gray-600">
         <h2 class="text-xl font-bold mb-4 text-white flex items-center">
           <svg class="w-6 h-6 mr-2 text-cyan-400" fill="currentColor" viewBox="0 0 20 20">
@@ -450,7 +550,7 @@
           </div>
           <div>
             <p class="text-white font-medium">Grant Permissions</p>
-            <p class="text-gray-300 text-sm">Allow access to motion sensors, location, and microphone</p>
+            <p class="text-gray-300 text-sm">Allow access to motion sensors and location</p>
           </div>
         </div>
         <div class="flex items-start p-3 bg-black bg-opacity-20 rounded-lg">
@@ -467,8 +567,8 @@
             <span class="text-white text-sm font-bold">3</span>
           </div>
           <div>
-            <p class="text-white font-medium">Voice Confirmation</p>
-            <p class="text-gray-300 text-sm">Say "pothole" within 5 seconds to confirm detections</p>
+            <p class="text-white font-medium">Confirm Events</p>
+            <p class="text-gray-300 text-sm">Use the buttons to confirm real potholes or mark false positives</p>
           </div>
         </div>
         <div class="flex items-start p-3 bg-black bg-opacity-20 rounded-lg">

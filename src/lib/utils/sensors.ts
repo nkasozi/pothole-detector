@@ -3,21 +3,11 @@ import type { AccelerometerReading, LocationData, PotholeEvent, DrivingSession }
 // Pothole detection threshold (in m/s²)
 const POTHOLE_THRESHOLD = 15; // Adjust based on testing
 
-// TypeScript declarations for Web Speech API
-declare global {
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
-}
-
 export class SensorManager {
   private _accelerometerPermission = false;
   private _locationPermission = false;
-  private _microphonePermission = false;
   private watchId: number | null = null;
   private accelerometerInterval: number | null = null;
-  private speechRecognition: any = null;
 
   get accelerometerPermission(): boolean {
     return this._accelerometerPermission;
@@ -25,10 +15,6 @@ export class SensorManager {
 
   get locationPermission(): boolean {
     return this._locationPermission;
-  }
-
-  get microphonePermission(): boolean {
-    return this._microphonePermission;
   }
 
   async requestPermissions(): Promise<boolean> {
@@ -61,18 +47,6 @@ export class SensorManager {
       console.warn('Location permission failed:', error);
       // Still allow the app to work without location
       this._locationPermission = 'geolocation' in navigator; // Mark as available even if permission denied
-    }
-
-    // Request microphone permission for speech recognition
-    try {
-      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach(track => track.stop()); // Stop the stream immediately
-        this._microphonePermission = true;
-      }
-    } catch (error) {
-      console.warn('Microphone permission failed:', error);
-      this._microphonePermission = false;
     }
 
     // Return true if we have at least accelerometer (core functionality)
@@ -142,30 +116,6 @@ export class SensorManager {
     );
   }
 
-  startSpeechRecognition(callback: (transcript: string) => void): void {
-    if (!this._microphonePermission) return;
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (SpeechRecognition) {
-      this.speechRecognition = new SpeechRecognition();
-      this.speechRecognition.continuous = true;
-      this.speechRecognition.interimResults = false;
-      this.speechRecognition.lang = 'en-US';
-
-      this.speechRecognition.onresult = (event: any) => {
-        const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
-        callback(transcript);
-      };
-
-      this.speechRecognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-      };
-
-      this.speechRecognition.start();
-    }
-  }
-
   stopAllSensors(): void {
     if (this.watchId !== null) {
       navigator.geolocation.clearWatch(this.watchId);
@@ -175,11 +125,6 @@ export class SensorManager {
     if (this.accelerometerInterval !== null) {
       clearInterval(this.accelerometerInterval);
       this.accelerometerInterval = null;
-    }
-
-    if (this.speechRecognition) {
-      this.speechRecognition.stop();
-      this.speechRecognition = null;
     }
 
     window.removeEventListener('devicemotion', () => {});

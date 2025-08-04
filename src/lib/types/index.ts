@@ -55,7 +55,7 @@ export interface PotholeEvent {
   location: LocationData;
   speed: number | null;
   label: 'pothole_detected' | 'pothole_confirmed' | 'false_positive';
-  voiceConfirmed: boolean;
+  userConfirmed: boolean | null; // null = not yet confirmed, true = confirmed pothole, false = false positive
   severity: 'low' | 'medium' | 'high';
 }
 
