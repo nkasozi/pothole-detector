@@ -30,6 +30,23 @@
   let sessionStartTime = 0;
   let sessionTimer: number;
 
+  // Google Maps Navigation
+  let routePlanned = false;
+  let mapInitialized = false;
+  let startAddress = '';
+  let startCoords: {lat: number, lng: number} | null = null;
+  let startSuggestions: google.maps.places.AutocompletePrediction[] = [];
+  let showStartSuggestions = false;
+  let destinationAddress = '';
+  let destinationCoords: {lat: number, lng: number} | null = null;
+  let destinationSuggestions: google.maps.places.AutocompletePrediction[] = [];
+  let showDestinationSuggestions = false;
+  let autocompleteService: google.maps.places.AutocompleteService | null = null;
+  let placesService: google.maps.places.PlacesService | null = null;
+  let searchInput: HTMLInputElement;
+
+  const GOOGLE_API_KEY = 'AIzaSyDQLELMbxd-S1RIWw_zCWt6TD_QaqpdsM4';
+
   // Reactive statements to ensure UI updates
   $: if (currentSession) {
     eventsCount = currentSession.events.length;
@@ -37,17 +54,273 @@
     falsePositives = currentSession.events.filter(e => e.userConfirmed === false).length;
   }
 
+  // Check if location is available for route planning
+  $: routePlanned = currentLocation !== null && destinationCoords !== null;
+
+  // Initialize Google Places API
+  function initializeGooglePlaces() {
+    // Only run in browser
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
+    }
+
+    // Load the Google Maps JavaScript API
+    if (typeof google === 'undefined') {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_API_KEY}&libraries=places&callback=initPlacesCallback`;
+      script.async = true;
+      script.defer = true;
+
+      // Set up global callback
+      (window as any).initPlacesCallback = () => {
+        autocompleteService = new google.maps.places.AutocompleteService();
+        console.log('Google Places API initialized');
+      };
+
+      document.head.appendChild(script);
+    } else if (google.maps?.places) {
+      autocompleteService = new google.maps.places.AutocompleteService();
+      console.log('Google Places API already loaded');
+    }
+  }
+
+  // Search for places using Google Places API
+  async function searchPlaces(query: string, isDestination: boolean = true) {
+    if (!autocompleteService || !query || query.length < 3) {
+      if (isDestination) {
+        destinationSuggestions = [];
+        showDestinationSuggestions = false;
+      } else {
+        startSuggestions = [];
+        showStartSuggestions = false;
+      }
+      return;
+    }
+
+    try {
+      const request: google.maps.places.AutocompletionRequest = {
+        input: query,
+        types: ['geocode', 'establishment']
+        // No country restrictions - search worldwide
+      };
+
+      autocompleteService.getPlacePredictions(request, (predictions, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+          if (isDestination) {
+            destinationSuggestions = predictions;
+            showDestinationSuggestions = true;
+          } else {
+            startSuggestions = predictions;
+            showStartSuggestions = true;
+          }
+        } else {
+          if (isDestination) {
+            destinationSuggestions = [];
+            showDestinationSuggestions = false;
+          } else {
+            startSuggestions = [];
+            showStartSuggestions = false;
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Places API error:', error);
+      if (isDestination) {
+        destinationSuggestions = [];
+        showDestinationSuggestions = false;
+      } else {
+        startSuggestions = [];
+        showStartSuggestions = false;
+      }
+    }
+  }
+
+  // Get place details from place ID
+  async function getPlaceDetails(placeId: string): Promise<{lat: number, lng: number} | null> {
+    return new Promise((resolve) => {
+      // Only run in browser
+      if (typeof window === 'undefined' || typeof document === 'undefined') {
+        resolve(null);
+        return;
+      }
+
+      if (!google?.maps?.places) {
+        resolve(null);
+        return;
+      }
+
+      // Create a temporary map element for PlacesService
+      const mapDiv = document.createElement('div');
+      const map = new google.maps.Map(mapDiv, { center: { lat: 0, lng: 0 }, zoom: 1 });
+      const service = new google.maps.places.PlacesService(map);
+
+      const request: google.maps.places.PlaceDetailsRequest = {
+        placeId: placeId,
+        fields: ['geometry']
+      };
+
+      service.getDetails(request, (place, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && place?.geometry?.location) {
+          const location = place.geometry.location;
+          resolve({
+            lat: location.lat(),
+            lng: location.lng()
+          });
+        } else {
+          console.error('Place details error:', status);
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  // Handle destination search input
+  function handleDestinationInput() {
+    searchPlaces(destinationAddress, true);
+  }
+
+  // Handle start location search input
+  function handleStartInput() {
+    searchPlaces(startAddress, false);
+  }
+
+  // Select a destination from suggestions
+  async function selectDestination(prediction: google.maps.places.AutocompletePrediction) {
+    destinationAddress = prediction.description;
+    showDestinationSuggestions = false;
+
+    try {
+      destinationCoords = await getPlaceDetails(prediction.place_id);
+      console.log('Destination selected:', destinationAddress, destinationCoords);
+
+      // If both locations are set, plan route
+      if (startCoords && destinationCoords) {
+        await planRoute();
+      }
+    } catch (error) {
+      console.error('Error getting place details:', error);
+      destinationCoords = null;
+    }
+  }
+
+  // Select a start location from suggestions
+  async function selectStartLocation(prediction: google.maps.places.AutocompletePrediction) {
+    startAddress = prediction.description;
+    showStartSuggestions = false;
+
+    try {
+      startCoords = await getPlaceDetails(prediction.place_id);
+      console.log('Start location selected:', startAddress, startCoords);
+
+      // If both locations are set, plan route
+      if (startCoords && destinationCoords) {
+        await planRoute();
+      }
+    } catch (error) {
+      console.error('Error getting place details:', error);
+      startCoords = null;
+    }
+  }
+
+  // Clear destination
+  function clearDestination() {
+    destinationAddress = '';
+    destinationCoords = null;
+    destinationSuggestions = [];
+    showDestinationSuggestions = false;
+  }
+
+  // Clear start location
+  function clearStartLocation() {
+    startAddress = '';
+    startCoords = null;
+    startSuggestions = [];
+    showStartSuggestions = false;
+  }
+
+  // Plan route between start and destination
+  async function planRoute() {
+    if (!startCoords || !destinationCoords) {
+      console.log('Both start and destination required for route planning');
+      return;
+    }
+
+    console.log('Planning route from', startCoords, 'to', destinationCoords);
+    console.log('Route displayed in iframe with directions');
+
+    routePlanned = true;
+  }  // Get user's current location and prefill start address
+  async function getCurrentLocationForStart() {
+    if (navigator.geolocation) {
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 300000
+          });
+        });
+
+        const { latitude, longitude } = position.coords;
+        startCoords = { lat: latitude, lng: longitude };
+
+        // Reverse geocode to get address
+        if (typeof window !== 'undefined' && window.google) {
+          const geocoder = new google.maps.Geocoder();
+          const response = await new Promise<google.maps.GeocoderResponse>((resolve, reject) => {
+            geocoder.geocode({ location: { lat: latitude, lng: longitude } }, (results, status) => {
+              if (status === 'OK' && results) {
+                resolve({ results });
+              } else {
+                reject(new Error('Geocoding failed'));
+              }
+            });
+          });
+
+          if (response.results && response.results[0]) {
+            startAddress = response.results[0].formatted_address;
+          }
+        }
+
+        console.log('Current location set as start:', startAddress, startCoords);
+      } catch (error) {
+        console.error('Error getting current location:', error);
+      }
+    }
+  }
+
+  // Handle click outside to close suggestions
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.destination-input-container') && !target.closest('.start-input-container')) {
+      showDestinationSuggestions = false;
+      showStartSuggestions = false;
+    }
+  }
+
   onMount(async () => {
     sensorManager = new SensorManager();
 
-    // Register service worker
-    if ('serviceWorker' in navigator) {
-      try {
-        await navigator.serviceWorker.register('/sw.js');
-        console.log('Service Worker registered');
-      } catch (error) {
-        console.error('Service Worker registration failed:', error);
+    // Only run browser-specific code in the browser
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      // Register service worker
+      if ('serviceWorker' in navigator) {
+        try {
+          await navigator.serviceWorker.register('/sw.js');
+          console.log('Service Worker registered');
+        } catch (error) {
+          console.error('Service Worker registration failed:', error);
+        }
       }
+
+      // Initialize Google Places API
+      initializeGooglePlaces();
+
+      // Add click outside handler
+      document.addEventListener('click', handleClickOutside);
+
+      // Try to get current location for start address
+      getCurrentLocationForStart();
     }
   });
 
@@ -57,6 +330,10 @@
     }
     if (sessionTimer) {
       clearInterval(sessionTimer);
+    }
+    // Remove click outside handler (only in browser)
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('click', handleClickOutside);
     }
   });
 
@@ -77,6 +354,16 @@
   function startSession() {
     if (!permissionDetails.accelerometer && !permissionsGranted) {
       alert('Motion sensor access is required for pothole detection. Please grant permissions first.');
+      return;
+    }
+
+    if (!currentLocation) {
+      alert('Location access is required for navigation. Please grant location permissions first.');
+      return;
+    }
+
+    if (!destinationCoords) {
+      alert('Please select a destination address before starting your session.');
       return;
     }
 
@@ -251,7 +538,7 @@
 <div class="min-h-screen bg-gradient-to-br from-gray-900 via-slate-800 to-gray-900 p-2 md:p-4 flex items-start md:items-center justify-center md:py-8">
   <div class="w-full max-w-md bg-gray-800 backdrop-blur-sm bg-opacity-90 rounded-2xl shadow-2xl overflow-hidden border border-gray-700 md:max-h-[90vh] md:overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
     <!-- Header -->
-    <div class="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6">
+    <div class="bg-blue-500 text-white p-6">
       <div class="flex items-center justify-center mb-2">
         <div class="w-8 h-8 bg-white rounded-full flex items-center justify-center mr-3">
           <svg class="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
@@ -270,7 +557,7 @@
 
     <!-- Permissions Section -->
     {#if !permissionsGranted}
-      <div class="p-6 bg-gradient-to-br from-slate-700 via-gray-700 to-slate-800 border-l-4 border-blue-500">
+      <div class="p-6 from-slate-700 via-gray-700 to-slate-800 border-4 border-blue-500">
         <div class="flex items-start">
           <div class="flex-shrink-0">
             <svg class="w-6 h-6 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
@@ -327,13 +614,353 @@
       </div>
     {/if}
 
+    <!-- Navigation & Maps with Google Places API -->
+    <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-4 border-blue-500">
+      <h2 class="text-xl font-bold mb-4 text-white flex items-center">
+        <svg class="w-6 h-6 mr-2 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+        </svg>
+        Navigation & Route Planning
+      </h2>
+
+      <div class="bg-gray-700 bg-opacity-60 backdrop-blur-sm rounded-xl p-4 border border-gray-600 shadow-lg space-y-4 mb-4">
+
+        <!-- Current Location Status -->
+        {#if currentLocation}
+          <div class="p-3 bg-green-900 bg-opacity-30 rounded-lg border border-green-600">
+            <div class="flex items-center text-green-400 mb-2">
+              <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+              </svg>
+              <span class="font-semibold text-sm">Starting Location Ready</span>
+            </div>
+            <div class="text-green-200 text-xs">
+              📍 Current: {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}
+            </div>
+          </div>
+        {:else}
+          <div class="p-3 bg-yellow-900 bg-opacity-30 rounded-lg border border-yellow-600">
+            <div class="flex items-center text-yellow-400 mb-2">
+              <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+              </svg>
+              <span class="font-semibold text-sm">Location Access Required</span>
+            </div>
+            <div class="text-yellow-200 text-xs mb-3">
+              Enable location services to use navigation features
+            </div>
+            <button
+              type="button"
+              on:click={requestPermissions}
+              class="bg-yellow-600 hover:bg-yellow-700 text-white py-2 px-3 rounded-lg text-xs transition-colors duration-200"
+            >
+              Enable Location
+            </button>
+          </div>
+        {/if}
+
+        <!-- Navigation Planning Section -->
+        <div class="space-y-6">
+          <!-- Start Location Search -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="block text-sm font-medium text-gray-300">Start Location</label>
+              {#if !startCoords}
+                <button
+                  type="button"
+                  on:click={getCurrentLocationForStart}
+                  class="text-xs text-blue-400 hover:text-blue-300 underline"
+                >
+                  Use Current Location
+                </button>
+              {/if}
+            </div>
+
+            <!-- Start Location Input with Autocomplete -->
+            <div class="relative start-input-container">
+              <input
+                type="text"
+                bind:value={startAddress}
+                on:input={handleStartInput}
+                on:focus={() => showStartSuggestions = startSuggestions.length > 0}
+                placeholder={startCoords ? "Current location set" : "Search for start location..."}
+                class="w-full p-3 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent pr-10"
+              />
+
+              <!-- Clear button -->
+              {#if startAddress}
+                <button
+                  type="button"
+                  on:click={clearStartLocation}
+                  class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                  </svg>
+                </button>
+              {/if}
+
+              <!-- Start Location Autocomplete Suggestions -->
+              {#if showStartSuggestions && startSuggestions.length > 0}
+                <div class="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                  {#each startSuggestions as prediction (prediction.place_id)}
+                    <button
+                      type="button"
+                      class="w-full text-left p-3 hover:bg-gray-700 text-white text-sm border-b border-gray-700 last:border-b-0 transition-colors duration-150"
+                      on:click={() => selectStartLocation(prediction)}
+                    >
+                      <div class="flex items-start">
+                        <svg class="w-4 h-4 mr-2 mt-0.5 text-green-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+                        </svg>
+                        <div class="flex-1">
+                          <div class="font-medium text-white">
+                            {prediction.structured_formatting?.main_text || prediction.description}
+                          </div>
+                          {#if prediction.structured_formatting?.secondary_text}
+                            <div class="text-gray-400 text-xs mt-1">
+                              {prediction.structured_formatting.secondary_text}
+                            </div>
+                          {/if}
+                        </div>
+                      </div>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+
+            <!-- Start Location Status -->
+            {#if startCoords}
+              <div class="p-3 bg-green-900 bg-opacity-30 rounded-lg border border-green-600">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center text-green-400">
+                    <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+                    </svg>
+                    <span class="text-sm font-medium">Start Location Set</span>
+                  </div>
+                  <button
+                    type="button"
+                    on:click={clearStartLocation}
+                    class="text-green-400 hover:text-green-300"
+                  >
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
+                  </button>
+                </div>
+                <div class="text-sm text-green-300 mt-1 truncate">
+                  {startAddress}
+                </div>
+              </div>
+            {/if}
+          </div>
+
+        <!-- Destination Search with Google Places API -->
+        <div class="space-y-3">
+          <label class="block text-sm font-medium text-gray-300">Select Destination</label>
+
+          <!-- Search Input with Autocomplete -->
+          <div class="relative destination-input-container">
+            <input
+              bind:this={searchInput}
+              type="text"
+              bind:value={destinationAddress}
+              on:input={handleDestinationInput}
+              on:focus={() => showDestinationSuggestions = destinationSuggestions.length > 0}
+              placeholder="Search for destination address..."
+              class="w-full p-3 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10"
+            />
+
+            <!-- Clear button -->
+            {#if destinationAddress}
+              <button
+                type="button"
+                on:click={clearDestination}
+                class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+              >
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                </svg>
+              </button>
+            {/if}
+
+            <!-- Google Places Autocomplete Suggestions -->
+            {#if showDestinationSuggestions && destinationSuggestions.length > 0}
+              <div class="absolute z-10 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                {#each destinationSuggestions as prediction (prediction.place_id)}
+                  <button
+                    type="button"
+                    class="w-full text-left p-3 hover:bg-gray-700 text-white text-sm border-b border-gray-700 last:border-b-0 transition-colors duration-150"
+                    on:click={() => selectDestination(prediction)}
+                  >
+                    <div class="flex items-start">
+                      <svg class="w-4 h-4 mr-2 mt-0.5 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+                      </svg>
+                      <div class="flex-1">
+                        <div class="font-medium text-white">
+                          {prediction.structured_formatting?.main_text || prediction.description}
+                        </div>
+                        {#if prediction.structured_formatting?.secondary_text}
+                          <div class="text-gray-400 text-xs mt-1">
+                            {prediction.structured_formatting.secondary_text}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Destination Status -->
+          {#if destinationCoords}
+            <div class="p-3 bg-blue-900 bg-opacity-30 rounded-lg border border-blue-600">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center text-blue-400">
+                  <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                  </svg>
+                  <span class="font-semibold text-sm">Destination Set</span>
+                </div>
+                <button
+                  type="button"
+                  on:click={clearDestination}
+                  class="text-blue-300 hover:text-white text-xs"
+                >
+                  Change
+                </button>
+              </div>
+              <div class="text-blue-200 text-xs mt-1">
+                🎯 {destinationAddress}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Route Planning Status -->
+          {#if startCoords && destinationCoords}
+            <div class="p-3 bg-purple-900 bg-opacity-30 rounded-lg border border-purple-600">
+              <div class="flex items-center text-purple-400">
+                <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                </svg>
+                <span class="text-sm font-medium">Route Ready</span>
+              </div>
+              <div class="text-purple-300 text-xs mt-1">
+                From: {startAddress}
+              </div>
+              <div class="text-purple-300 text-xs">
+                To: {destinationAddress}
+              </div>
+              <div class="text-purple-200 text-xs mt-1 italic">
+                🗺️ Route displayed in map below
+              </div>
+            </div>
+          {:else if startCoords || destinationCoords}
+            <div class="p-3 bg-yellow-900 bg-opacity-30 rounded-lg border border-yellow-600">
+              <div class="flex items-center text-yellow-400">
+                <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                </svg>
+                <span class="text-sm">
+                  {#if !startCoords}
+                    Set start location to plan route
+                  {:else}
+                    Set destination to plan route
+                  {/if}
+                </span>
+              </div>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Navigation Map -->
+        {#if currentLocation}
+          {#if startCoords && destinationCoords}
+            <!-- Route Map with Directions -->
+            <div class="border-t border-gray-600 pt-4">
+              <div class="mb-2 p-2 bg-green-900 bg-opacity-30 rounded text-xs text-green-400 flex items-center">
+                <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                </svg>
+                Route ready for navigation
+              </div>
+
+              <!-- Navigation Map with Directions -->
+              <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden mb-4">
+                <iframe
+                  src="https://www.google.com/maps/embed/v1/directions?key={GOOGLE_API_KEY}&origin={startCoords.lat},{startCoords.lng}&destination={destinationCoords.lat},{destinationCoords.lng}&mode=driving&avoid=tolls"
+                  class="w-full h-full border-0"
+                  allowfullscreen
+                  loading="lazy"
+                  referrerpolicy="no-referrer-when-downgrade"
+                  title="Google Maps - Navigation Route"
+                ></iframe>
+              </div>
+
+              <!-- Route Status -->
+              <div class="text-center p-3 bg-blue-900 bg-opacity-30 rounded-lg">
+                <div class="flex items-center justify-center text-blue-400 mb-2">
+                  <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                  </svg>
+                  <span class="font-medium">Route Ready</span>
+                </div>
+                <p class="text-blue-300 text-sm">
+                  🗺️ Your route is displayed above with turn-by-turn directions
+                </p>
+                <p class="text-blue-200 text-xs mt-1">
+                  Tap the map to interact or zoom for more details
+                </p>
+              </div>
+            </div>
+          {:else}
+            <!-- Current Location Map -->
+            <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden mb-4">
+              <iframe
+                src="https://www.google.com/maps/embed/v1/view?key={GOOGLE_API_KEY}&center={currentLocation.latitude},{currentLocation.longitude}&zoom=15&maptype=roadmap"
+                class="w-full h-full border-0"
+                allowfullscreen
+                loading="lazy"
+                referrerpolicy="no-referrer-when-downgrade"
+                title="Google Maps - Current Location"
+              ></iframe>
+            </div>
+
+            <!-- Instructions -->
+            <div class="text-center p-3 bg-blue-900 bg-opacity-20 rounded-lg">
+              <p class="text-blue-300 text-sm">
+                🔍 Search for your destination above to plan your route
+              </p>
+            </div>
+          {/if}
+        {:else}
+          <!-- Default Map -->
+          <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden">
+            <iframe
+              src="https://www.google.com/maps/embed/v1/view?key={GOOGLE_API_KEY}&center=40.7128,-74.0060&zoom=10&maptype=roadmap"
+              class="w-full h-full border-0"
+              allowfullscreen
+              loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade"
+              title="Google Maps - Default View"
+            ></iframe>
+          </div>
+        {/if}
+      </div>
+    </div>
+    </div>
+
     <!-- Session Controls -->
-    <div class="p-6">
+    <div class="p-6 border-4 border-blue-500">
       <div class="space-y-4">
         {#if sessionStatus === 'idle'}
           <button
             on:click={startSession}
-            disabled={!permissionDetails.accelerometer}
+            disabled={!permissionDetails.accelerometer || !currentLocation || !destinationCoords}
             class="w-full bg-gradient-to-r from-emerald-500 to-green-500 text-white py-4 px-6 rounded-xl font-semibold text-lg disabled:from-gray-600 disabled:to-gray-700 disabled:text-gray-400 hover:from-emerald-600 hover:to-green-600 transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 shadow-lg disabled:shadow-none flex items-center justify-center"
           >
             <svg class="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
@@ -344,6 +971,14 @@
           {#if !permissionDetails.accelerometer}
             <div class="text-center p-3 bg-gray-700 rounded-lg">
               <p class="text-sm text-gray-300">Motion sensor access required</p>
+            </div>
+          {:else if !currentLocation}
+            <div class="text-center p-3 bg-gray-700 rounded-lg">
+              <p class="text-sm text-gray-300">Location access required for navigation</p>
+            </div>
+          {:else if !destinationCoords}
+            <div class="text-center p-3 bg-gray-700 rounded-lg">
+              <p class="text-sm text-gray-300">Select a destination address below</p>
             </div>
           {/if}
         {:else}
@@ -362,7 +997,7 @@
 
     <!-- Session Stats -->
     {#if sessionStatus === 'active'}
-      <div class="p-6 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 border-t border-gray-600">
+      <div class="p-6 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 border-4 border-blue-500">
         <h2 class="text-xl font-bold mb-4 text-white flex items-center">
           <svg class="w-6 h-6 mr-2 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
             <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
@@ -391,7 +1026,7 @@
 
       <!-- Events Timeline -->
       {#if sessionStatus === 'active' && currentSession}
-        <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-t border-gray-600">
+        <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-4 border-blue-500">
           <h2 class="text-xl font-bold mb-4 text-white flex items-center">
             <svg class="w-6 h-6 mr-2 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
@@ -577,7 +1212,7 @@
       {/if}
 
       <!-- Current Readings -->
-      <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-t border-gray-600">
+      <div class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-4 border-blue-500">
         <h2 class="text-xl font-bold mb-4 text-white flex items-center">
           <svg class="w-6 h-6 mr-2 text-cyan-400" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M6 6V5a3 3 0 013-3h2a3 3 0 013 3v1h2a2 2 0 012 2v3.57A22.952 22.952 0 0110 13a22.95 22.95 0 01-8-1.43V8a2 2 0 012-2h2zm2-1a1 1 0 011-1h2a1 1 0 011 1v1H8V5zm1 5a1 1 0 011-1h.01a1 1 0 110 2H10a1 1 0 01-1-1z" clip-rule="evenodd"/>
@@ -647,7 +1282,7 @@
     {/if}
 
     <!-- Instructions -->
-    <div class="p-6 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 border-t border-gray-600">
+    <div class="p-6 bg-gradient-to-br from-gray-700 via-gray-800 to-gray-900 border-4 border-blue-500 rounded-bl-[4px] rounded-br-[4px]">
       <h2 class="text-xl font-bold mb-4 text-white flex items-center">
         <svg class="w-6 h-6 mr-2 text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
           <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
