@@ -30,6 +30,13 @@
   let sessionStartTime = 0;
   let sessionTimer: number;
 
+  // Reactive statements to ensure UI updates
+  $: if (currentSession) {
+    eventsCount = currentSession.events.length;
+    confirmedPotholes = currentSession.events.filter(e => e.userConfirmed === true).length;
+    falsePositives = currentSession.events.filter(e => e.userConfirmed === false).length;
+  }
+
   onMount(async () => {
     sensorManager = new SensorManager();
 
@@ -145,6 +152,11 @@
 
       currentSession.events.push(event);
       eventsCount = currentSession.events.length;
+
+      // Force reactivity by creating a new reference
+      currentSession = { ...currentSession, events: [...currentSession.events] };
+
+      console.log('Pothole detected! Total events:', eventsCount, 'Session events:', currentSession.events.length);
 
       // Provide haptic feedback if available
       if ('vibrate' in navigator) {
@@ -385,6 +397,10 @@
               <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
             </svg>
             Event Timeline ({currentSession.events.length})
+            <!-- Debug info -->
+            {#if currentSession.events.length !== eventsCount}
+              <span class="text-red-400 text-sm ml-2">[Mismatch: {eventsCount}]</span>
+            {/if}
           </h2>
 
           <div class="relative min-h-32 max-h-80 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
@@ -418,6 +434,7 @@
             <!-- Events -->
             {#if currentSession.events.length > 0}
               <div class="space-y-4 pb-4">
+                <div class="text-xs text-gray-400 mb-2">DEBUG: Showing {currentSession.events.length} events</div>
                 {#each [...currentSession.events].reverse() as event, index (event.id)}
                   <div class="relative flex items-start space-x-4">
                     <!-- Timeline Node -->
@@ -544,8 +561,11 @@
                   <div class="bg-gray-600 bg-opacity-30 backdrop-blur-sm rounded-xl p-4 border border-dashed border-gray-500">
                     <div class="text-center">
                       <div class="text-gray-400 text-sm font-medium mb-1">👁️ Waiting for events...</div>
-                      <div class="text-gray-500 text-xs">
+                      <div class="text-gray-500 text-xs mb-2">
                         Drive over bumps or potholes to see detections appear here
+                      </div>
+                      <div class="text-red-400 text-xs">
+                        DEBUG: Events count shows {eventsCount} but currentSession.events.length is {currentSession.events.length}
                       </div>
                     </div>
                   </div>
