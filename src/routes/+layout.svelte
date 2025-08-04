@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { injectAnalytics } from '@vercel/analytics/sveltekit';
   import '../app.css';
+
+  // Inject Vercel Analytics
+  injectAnalytics();
 
   onMount(() => {
     // Register service worker for PWA functionality
