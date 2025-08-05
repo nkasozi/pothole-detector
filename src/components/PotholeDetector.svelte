@@ -1447,39 +1447,50 @@
     currentAccelerometer = reading;
 
     if (detectPothole(reading) && currentLocation && currentSession) {
-      const event: PotholeEvent = {
-        id: generateEventId(),
-        timestamp: reading.timestamp,
-        accelerometer: reading,
-        location: currentLocation,
-        speed: currentLocation.speed,
-        label: "pothole_detected",
-        userConfirmed: null, // Not yet confirmed
-        severity: calculateSeverity(reading),
-      };
+      // Calculate severity first to determine if we should record this event
+      const severity = calculateSeverity(reading);
 
-      currentSession.events.push(event);
-      eventsCount = currentSession.events.length;
+      // Only record medium and high severity potholes, skip low severity ones
+      if (severity === "medium" || severity === "high") {
+        const event: PotholeEvent = {
+          id: generateEventId(),
+          timestamp: reading.timestamp,
+          accelerometer: reading,
+          location: currentLocation,
+          speed: currentLocation.speed,
+          label: "pothole_detected",
+          userConfirmed: null, // Not yet confirmed
+          severity: severity,
+        };
 
-      // Force reactivity by creating a new reference
-      currentSession = {
-        ...currentSession,
-        events: [...currentSession.events],
-      };
+        currentSession.events.push(event);
+        eventsCount = currentSession.events.length;
 
-      // Add pothole marker to the map
-      addPotholeMarker(event);
+        // Force reactivity by creating a new reference
+        currentSession = {
+          ...currentSession,
+          events: [...currentSession.events],
+        };
 
-      console.log(
-        "Pothole detected! Total events:",
-        eventsCount,
-        "Session events:",
-        currentSession.events.length
-      );
+        // Add pothole marker to the map
+        addPotholeMarker(event);
 
-      // Provide haptic feedback if available
-      if ("vibrate" in navigator) {
-        navigator.vibrate([100, 50, 100]);
+        console.log(
+          `${severity.toUpperCase()} severity pothole detected! Total events:`,
+          eventsCount,
+          "Session events:",
+          currentSession.events.length
+        );
+
+        // Provide haptic feedback if available
+        if ("vibrate" in navigator) {
+          navigator.vibrate([100, 50, 100]);
+        }
+      } else {
+        // Log filtered out low severity events for debugging
+        console.log(
+          `Low severity pothole filtered out at location: ${currentLocation.latitude.toFixed(6)}, ${currentLocation.longitude.toFixed(6)}`
+        );
       }
     }
   }
