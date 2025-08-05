@@ -69,6 +69,8 @@
   let currentLocationMarker: google.maps.Marker | null = null;
   let potholeMarkers: google.maps.Marker[] = [];
   let navigationStarted = false;
+  let speechSynthesis: SpeechSynthesis | null = null;
+  let currentDirectionsResult: google.maps.DirectionsResult | null = null;
 
   const GOOGLE_API_KEY = "AIzaSyDQLELMbxd-S1RIWw_zCWt6TD_QaqpdsM4";
 
@@ -546,6 +548,9 @@
       directionsRenderer.setDirections(result);
       routePlanned = true;
 
+      // Store the directions result for interactive features
+      currentDirectionsResult = result;
+
       // Fit the map to show the entire route initially (with better bounds)
       const route = result.routes[0];
       if (route && route.bounds) {
@@ -638,6 +643,7 @@
         // Style the directions panel to look like Google Maps
         setTimeout(() => {
           styleDirectionsPanel(directionsPanel);
+          setupInteractiveDirections(directionsPanel);
         }, 200);
       } else {
         console.error("Directions panel not found in DOM");
@@ -867,6 +873,12 @@
         background: white !important;
         border-radius: 4px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+        cursor: pointer !important;
+        transition: background-color 0.2s ease !important;
+      }
+      #directions-panel .adp-substep:hover {
+        background: #f8f9fa !important;
+        border-left-color: #0d47a1 !important;
       }
       #directions-panel .adp-maneuver {
         color: #1a73e8 !important;
@@ -895,8 +907,182 @@
         height: 20px !important;
         margin-right: 8px !important;
       }
+      .audio-controls {
+        position: absolute !important;
+        top: 10px !important;
+        left: 10px !important;
+        z-index: 1001 !important;
+      }
     `;
     document.head.appendChild(style);
+  }
+
+  // Setup interactive directions - click to show on map and audio features
+  function setupInteractiveDirections(panel: HTMLElement) {
+    if (!currentDirectionsResult || !map) return;
+
+    // Initialize speech synthesis
+    if (typeof window !== "undefined" && 'speechSynthesis' in window) {
+      speechSynthesis = window.speechSynthesis;
+    }
+
+    // Wait for Google Maps to render the directions content
+    setTimeout(() => {
+      const steps = panel.querySelectorAll('.adp-substep');
+      const route = currentDirectionsResult.routes[0];
+      
+      if (route && route.legs && route.legs[0] && route.legs[0].steps) {
+        const routeSteps = route.legs[0].steps;
+
+        steps.forEach((stepElement, index) => {
+          if (index < routeSteps.length) {
+            const step = routeSteps[index];
+            
+            // Add click handler to center map on this step
+            stepElement.addEventListener('click', () => {
+              if (step.start_location) {
+                map.setCenter({
+                  lat: step.start_location.lat(),
+                  lng: step.start_location.lng()
+                });
+                map.setZoom(18); // Close zoom for detailed view
+                
+                // Speak the instruction
+                speakInstruction(step.instructions);
+              }
+            });
+
+            // Add hover effect and tooltip
+            stepElement.title = 'Click to view this step on map and hear audio';
+            stepElement.style.cursor = 'pointer';
+          }
+        });
+      }
+
+      // Add audio controls to the panel
+      addAudioControls(panel);
+    }, 500); // Wait for Google to populate the directions
+  }
+
+  // Add audio controls to the directions panel
+  function addAudioControls(panel: HTMLElement) {
+    if (!speechSynthesis) return;
+
+    const audioControlsDiv = document.createElement('div');
+    audioControlsDiv.className = 'audio-controls';
+    audioControlsDiv.innerHTML = `
+      <div style="display: flex; gap: 8px; background: rgba(255,255,255,0.9); padding: 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+        <button id="speak-all-btn" style="background: #1a73e8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          🔊 Speak All
+        </button>
+        <button id="stop-speech-btn" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          🔇 Stop
+        </button>
+      </div>
+    `;
+
+    panel.appendChild(audioControlsDiv);
+
+    // Add event listeners for audio controls
+    const speakAllBtn = audioControlsDiv.querySelector('#speak-all-btn');
+    const stopSpeechBtn = audioControlsDiv.querySelector('#stop-speech-btn');
+
+    speakAllBtn?.addEventListener('click', () => {
+      speakAllDirections();
+    });
+
+    stopSpeechBtn?.addEventListener('click', () => {
+      stopSpeech();
+    });
+  }
+
+  // Speak a single instruction
+  function speakInstruction(instruction: string) {
+    if (!speechSynthesis) return;
+
+    // Stop any current speech
+    speechSynthesis.cancel();
+
+    // Clean HTML tags from instruction
+    const cleanInstruction = instruction.replace(/<[^>]*>/g, '');
+    
+    const utterance = new SpeechSynthesisUtterance(cleanInstruction);
+    utterance.rate = 0.9; // Slightly slower for clarity
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    // Use a clear voice if available
+    const voices = speechSynthesis.getVoices();
+    const preferredVoice = voices.find(voice =>
+      voice.lang.includes('en') && (voice.name.includes('Google') || voice.name.includes('Microsoft'))
+    );
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    speechSynthesis.speak(utterance);
+  }
+
+  // Speak all directions in sequence
+  function speakAllDirections() {
+    if (!speechSynthesis || !currentDirectionsResult) return;
+
+    const route = currentDirectionsResult.routes[0];
+    if (!route?.legs?.[0]?.steps) return;
+
+    speechSynthesis.cancel(); // Stop any current speech
+
+    const steps = route.legs[0].steps;
+    let stepIndex = 0;
+
+    function speakNextStep() {
+      if (stepIndex >= steps.length) return;
+
+      const step = steps[stepIndex];
+      const cleanInstruction = step.instructions.replace(/<[^>]*>/g, '');
+      
+      const utterance = new SpeechSynthesisUtterance(cleanInstruction);
+      utterance.rate = 0.9;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+
+      // Use a clear voice if available
+      const voices = speechSynthesis.getVoices();
+      const preferredVoice = voices.find(voice =>
+        voice.lang.includes('en') && (voice.name.includes('Google') || voice.name.includes('Microsoft'))
+      );
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+
+      utterance.onend = () => {
+        stepIndex++;
+        // Small pause between instructions
+        setTimeout(speakNextStep, 800);
+      };
+
+      utterance.onerror = () => {
+        stepIndex++;
+        setTimeout(speakNextStep, 500);
+      };
+
+      speechSynthesis.speak(utterance);
+    }
+
+    // Start with overview
+    const overview = `Navigation ready. ${steps.length} steps to destination.`;
+    const overviewUtterance = new SpeechSynthesisUtterance(overview);
+    overviewUtterance.onend = () => {
+      setTimeout(speakNextStep, 1000);
+    };
+    speechSynthesis.speak(overviewUtterance);
+  }
+
+  // Stop speech synthesis
+  function stopSpeech() {
+    if (speechSynthesis) {
+      speechSynthesis.cancel();
+    }
   }
 
   // Update current location marker on the map
@@ -1217,6 +1403,9 @@
 
     // Stop navigation
     navigationStarted = false;
+
+    // Stop any ongoing speech
+    stopSpeech();
 
     // Reset map view to normal
     if (map) {
