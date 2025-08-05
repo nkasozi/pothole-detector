@@ -117,8 +117,29 @@
         autocompleteService = new google.maps.places.AutocompleteService();
         directionsService = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer({
-          draggable: true,
+          draggable: false,
           panel: null,
+          suppressMarkers: false,
+          suppressInfoWindows: true,
+          polylineOptions: {
+            strokeColor: "#4285F4",
+            strokeWeight: 6,
+            strokeOpacity: 0.8,
+          },
+          markerOptions: {
+            icon: {
+              url:
+                "data:image/svg+xml;charset=UTF-8," +
+                encodeURIComponent(`
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="12" cy="12" r="10" fill="#EA4335" stroke="#ffffff" stroke-width="2"/>
+                  <circle cx="12" cy="12" r="4" fill="#ffffff"/>
+                </svg>
+              `),
+              scaledSize: new google.maps.Size(24, 24),
+              anchor: new google.maps.Point(12, 12),
+            },
+          },
         });
         console.log("Google Maps API initialized");
         initializeMap();
@@ -129,8 +150,29 @@
       autocompleteService = new google.maps.places.AutocompleteService();
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer({
-        draggable: true,
+        draggable: false,
         panel: null,
+        suppressMarkers: false,
+        suppressInfoWindows: true,
+        polylineOptions: {
+          strokeColor: "#4285F4",
+          strokeWeight: 6,
+          strokeOpacity: 0.8,
+        },
+        markerOptions: {
+          icon: {
+            url:
+              "data:image/svg+xml;charset=UTF-8," +
+              encodeURIComponent(`
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="10" fill="#EA4335" stroke="#ffffff" stroke-width="2"/>
+                <circle cx="12" cy="12" r="4" fill="#ffffff"/>
+              </svg>
+            `),
+            scaledSize: new google.maps.Size(24, 24),
+            anchor: new google.maps.Point(12, 12),
+          },
+        },
       });
       console.log("Google Maps API already loaded");
       initializeMap();
@@ -359,8 +401,13 @@
         origin: startCoords,
         destination: destinationCoords,
         travelMode: google.maps.TravelMode.DRIVING,
-        avoidTolls: true,
+        avoidTolls: false, // Allow tolls for better navigation like Google Maps
+        avoidHighways: false,
+        avoidFerries: true,
         optimizeWaypoints: true,
+        // Request detailed step information for turn-by-turn navigation
+        provideRouteAlternatives: false, // Focus on single best route for navigation
+        unitSystem: google.maps.UnitSystem.METRIC,
       };
 
       const result = await new Promise<google.maps.DirectionsResult>(
@@ -378,9 +425,16 @@
       directionsRenderer.setDirections(result);
       routePlanned = true;
 
+      // Fit the map to show the entire route initially
+      const route = result.routes[0];
+      if (route && route.bounds) {
+        map.fitBounds(route.bounds, { padding: 50 });
+      }
+
       console.log("Route planned successfully with Google Maps SDK");
       console.log("Distance:", result.routes[0].legs[0].distance?.text);
       console.log("Duration:", result.routes[0].legs[0].duration?.text);
+      console.log("Steps:", result.routes[0].legs[0].steps?.length);
 
       // Start navigation if both locations are set
       if (navigationStarted) {
@@ -392,29 +446,276 @@
     }
   }
 
-  // Start turn-by-turn navigation
+  // Start turn-by-turn navigation exactly like Google Maps app
   function startTurnByTurnNavigation() {
-    if (!map || !directionsRenderer) return;
+    if (!map || !directionsRenderer || !startCoords) return;
 
     navigationStarted = true;
 
-    // Enable turn-by-turn guidance panel
+    // Enable turn-by-turn guidance panel with enhanced styling
     const directionsPanel = document.getElementById("directions-panel");
     if (directionsPanel) {
       directionsRenderer.setPanel(directionsPanel);
+
+      // Style the directions panel to look like Google Maps
+      setTimeout(() => {
+        styleDirectionsPanel(directionsPanel);
+      }, 100);
+
+      // Configure DirectionsRenderer for navigation mode
+      directionsRenderer.setOptions({
+        suppressMarkers: false,
+        suppressInfoWindows: false,
+        preserveViewport: false,
+        draggable: false,
+        markerOptions: {
+          icon: {
+            url:
+              "data:image/svg+xml;charset=UTF-8," +
+              encodeURIComponent(`
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="14" fill="#4285F4" stroke="#ffffff" stroke-width="2"/>
+                <path d="M16 8L20 14H18V20H14V14H12L16 8Z" fill="#ffffff"/>
+              </svg>
+            `),
+            scaledSize: new google.maps.Size(32, 32),
+            anchor: new google.maps.Point(16, 16),
+          },
+        },
+      });
     }
 
-    // Set up navigation-optimized map options
+    // Center and zoom to start location like Google Maps app
+    map.setCenter(startCoords);
+    map.setZoom(19); // Close zoom for navigation
+
+    // Set up navigation-optimized map options (like Google Maps app)
     map.setOptions({
-      zoom: 18,
       mapTypeId: google.maps.MapTypeId.ROADMAP,
       zoomControl: false,
       mapTypeControl: false,
       streetViewControl: false,
       fullscreenControl: false,
+      rotateControl: false,
+      scaleControl: false,
+      // Enable traffic layer for real-time navigation
+      trafficLayer: true,
+      styles: [
+        // Simplified map styling for navigation focus
+        {
+          featureType: "poi",
+          elementType: "labels",
+          stylers: [{ visibility: "simplified" }],
+        },
+        {
+          featureType: "road",
+          elementType: "labels",
+          stylers: [{ visibility: "on" }],
+        },
+        {
+          featureType: "transit",
+          elementType: "labels",
+          stylers: [{ visibility: "off" }],
+        },
+      ],
     });
 
-    console.log("Turn-by-turn navigation started");
+    // Enable traffic layer for real-time conditions
+    const trafficLayer = new google.maps.TrafficLayer();
+    trafficLayer.setMap(map);
+
+    // Track user location during navigation if available
+    if (currentLocation) {
+      // Update map center to follow user location (like Google Maps)
+      const userPosition = {
+        lat: currentLocation.latitude,
+        lng: currentLocation.longitude,
+      };
+
+      // Smoothly pan to user location
+      map.panTo(userPosition);
+
+      // Set up location tracking for navigation
+      if (navigator.geolocation) {
+        const watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const newPos = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            };
+
+            // Keep map centered on user location during navigation
+            map.panTo(newPos);
+
+            // Update the current location marker
+            if (currentLocationMarker) {
+              currentLocationMarker.setPosition(newPos);
+            }
+          },
+          (error) => console.warn("Location tracking error:", error),
+          {
+            enableHighAccuracy: true,
+            timeout: 5000,
+            maximumAge: 1000,
+          }
+        );
+
+        // Store watch ID for cleanup
+        map.set("locationWatchId", watchId);
+      }
+    }
+
+    // Add custom navigation controls overlay
+    addNavigationControls();
+
+    console.log(
+      "Turn-by-turn navigation started with Google Maps app-like experience"
+    );
+  }
+
+  // Add custom navigation controls like Google Maps app
+  function addNavigationControls() {
+    if (!map) return;
+
+    // Create custom control div
+    const controlDiv = document.createElement("div");
+    controlDiv.style.position = "absolute";
+    controlDiv.style.top = "10px";
+    controlDiv.style.right = "10px";
+    controlDiv.style.zIndex = "1000";
+    controlDiv.style.display = "flex";
+    controlDiv.style.flexDirection = "column";
+    controlDiv.style.gap = "8px";
+
+    // Re-center button (like Google Maps location button)
+    const recenterBtn = document.createElement("button");
+    recenterBtn.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+    `;
+    recenterBtn.style.cssText = `
+      background: white;
+      border: none;
+      border-radius: 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      padding: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    `;
+    recenterBtn.title = "Re-center on your location";
+
+    recenterBtn.onclick = () => {
+      if (currentLocation) {
+        const userPos = {
+          lat: currentLocation.latitude,
+          lng: currentLocation.longitude,
+        };
+        map.setCenter(userPos);
+        map.setZoom(19);
+      }
+    };
+
+    // Zoom controls
+    const zoomInBtn = document.createElement("button");
+    zoomInBtn.innerHTML = "+";
+    zoomInBtn.style.cssText = `
+      background: white;
+      border: none;
+      border-radius: 4px 4px 0 0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      color: #666;
+    `;
+    zoomInBtn.onclick = () => map.setZoom(map.getZoom() + 1);
+
+    const zoomOutBtn = document.createElement("button");
+    zoomOutBtn.innerHTML = "−";
+    zoomOutBtn.style.cssText = `
+      background: white;
+      border: none;
+      border-radius: 0 0 4px 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      color: #666;
+      border-top: 1px solid #e0e0e0;
+    `;
+    zoomOutBtn.onclick = () => map.setZoom(map.getZoom() - 1);
+
+    const zoomContainer = document.createElement("div");
+    zoomContainer.appendChild(zoomInBtn);
+    zoomContainer.appendChild(zoomOutBtn);
+
+    controlDiv.appendChild(recenterBtn);
+    controlDiv.appendChild(zoomContainer);
+
+    // Add controls to map container
+    mapContainer.appendChild(controlDiv);
+  }
+
+  // Style the directions panel to look like Google Maps
+  function styleDirectionsPanel(panel: HTMLElement) {
+    // Apply Google Maps-like styling to the directions content
+    const style = document.createElement("style");
+    style.textContent = `
+      #directions-panel {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      }
+      #directions-panel .adp-summary {
+        background: #1a73e8 !important;
+        color: white !important;
+        padding: 12px !important;
+        border-radius: 8px !important;
+        margin-bottom: 8px !important;
+        font-weight: 500 !important;
+      }
+      #directions-panel .adp-substep {
+        border-left: 3px solid #1a73e8 !important;
+        padding: 8px 12px !important;
+        margin: 4px 0 !important;
+        background: white !important;
+        border-radius: 4px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+      }
+      #directions-panel .adp-maneuver {
+        color: #1a73e8 !important;
+        font-weight: 600 !important;
+        margin-right: 8px !important;
+      }
+      #directions-panel .adp-distance {
+        color: #5f6368 !important;
+        font-size: 12px !important;
+        float: right !important;
+      }
+      #directions-panel .adp-duration {
+        color: #5f6368 !important;
+        font-size: 12px !important;
+      }
+      #directions-panel table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+      }
+      #directions-panel td {
+        padding: 8px !important;
+        border-bottom: 1px solid #e8eaed !important;
+      }
+      #directions-panel .adp-stepicon {
+        width: 20px !important;
+        height: 20px !important;
+        margin-right: 8px !important;
+      }
+    `;
+    document.head.appendChild(style);
   }
 
   // Update current location marker on the map
@@ -1433,19 +1734,51 @@
                   </div>
                 {/if}
 
-                <!-- Turn-by-Turn Directions Panel -->
+                <!-- Turn-by-Turn Directions Panel (Google Maps style) -->
                 {#if navigationStarted}
                   <div
-                    class="absolute top-4 right-4 w-80 max-h-80 bg-white rounded-lg shadow-xl overflow-hidden z-10"
+                    class="absolute top-4 right-4 w-96 max-h-96 bg-white rounded-lg shadow-2xl overflow-hidden z-10 border border-gray-200"
                   >
-                    <div class="bg-blue-600 text-white p-3">
-                      <h3 class="font-semibold text-sm">
-                        Turn-by-Turn Directions
-                      </h3>
+                    <div
+                      class="bg-blue-600 text-white p-4 flex items-center justify-between"
+                    >
+                      <div class="flex items-center">
+                        <svg
+                          class="w-5 h-5 mr-2"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fill-rule="evenodd"
+                            d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6z"
+                            clip-rule="evenodd"
+                          />
+                        </svg>
+                        <h3 class="font-semibold text-sm">Navigation Active</h3>
+                      </div>
+                      <button
+                        on:click={() => {
+                          navigationStarted = false;
+                        }}
+                        class="text-white hover:text-gray-200 p-1 rounded"
+                      >
+                        <svg
+                          class="w-4 h-4"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fill-rule="evenodd"
+                            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                            clip-rule="evenodd"
+                          />
+                        </svg>
+                      </button>
                     </div>
                     <div
                       id="directions-panel"
-                      class="p-2 text-sm max-h-64 overflow-y-auto"
+                      class="p-3 text-sm max-h-80 overflow-y-auto bg-gray-50"
+                      style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"
                     ></div>
                   </div>
                 {/if}
