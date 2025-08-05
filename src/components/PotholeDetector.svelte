@@ -47,6 +47,26 @@
 
   const GOOGLE_API_KEY = 'AIzaSyDQLELMbxd-S1RIWw_zCWt6TD_QaqpdsM4';
 
+  // Reactive map URL for directions - only when both locations are set
+  $: directionsMapUrl = startCoords && destinationCoords && startAddress && destinationAddress
+    ? `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_API_KEY}&origin=${encodeURIComponent(startAddress)}&destination=${encodeURIComponent(destinationAddress)}&mode=driving&avoid=tolls`
+    : null;
+
+  // Debug log for map URL changes
+  $: if (directionsMapUrl) {
+    console.log('Directions map URL updated:', directionsMapUrl);
+  }
+
+  // Current location map URL
+  $: currentLocationMapUrl = currentLocation
+    ? `https://www.google.com/maps/embed/v1/view?key=${GOOGLE_API_KEY}&center=${currentLocation.latitude},${currentLocation.longitude}&zoom=15&maptype=roadmap`
+    : `https://www.google.com/maps/embed/v1/view?key=${GOOGLE_API_KEY}&center=40.7128,-74.0060&zoom=10&maptype=roadmap`;
+
+  // Automatically trigger route planning when both coordinates are available
+  $: if (startCoords && destinationCoords && !routePlanned) {
+    planRoute();
+  }
+
   // Reactive statements to ensure UI updates
   $: if (currentSession) {
     eventsCount = currentSession.events.length;
@@ -188,15 +208,11 @@
   async function selectDestination(prediction: google.maps.places.AutocompletePrediction) {
     destinationAddress = prediction.description;
     showDestinationSuggestions = false;
+    routePlanned = false; // Reset route planning state
 
     try {
       destinationCoords = await getPlaceDetails(prediction.place_id);
       console.log('Destination selected:', destinationAddress, destinationCoords);
-
-      // If both locations are set, plan route
-      if (startCoords && destinationCoords) {
-        await planRoute();
-      }
     } catch (error) {
       console.error('Error getting place details:', error);
       destinationCoords = null;
@@ -207,15 +223,11 @@
   async function selectStartLocation(prediction: google.maps.places.AutocompletePrediction) {
     startAddress = prediction.description;
     showStartSuggestions = false;
+    routePlanned = false; // Reset route planning state
 
     try {
       startCoords = await getPlaceDetails(prediction.place_id);
       console.log('Start location selected:', startAddress, startCoords);
-
-      // If both locations are set, plan route
-      if (startCoords && destinationCoords) {
-        await planRoute();
-      }
     } catch (error) {
       console.error('Error getting place details:', error);
       startCoords = null;
@@ -228,6 +240,7 @@
     destinationCoords = null;
     destinationSuggestions = [];
     showDestinationSuggestions = false;
+    routePlanned = false;
   }
 
   // Clear start location
@@ -236,6 +249,7 @@
     startCoords = null;
     startSuggestions = [];
     showStartSuggestions = false;
+    routePlanned = false;
   }
 
   // Plan route between start and destination
@@ -249,8 +263,16 @@
     console.log('Route displayed in iframe with directions');
 
     routePlanned = true;
-  }  // Get user's current location and prefill start address
+  }
+
+  // Get user's current location and prefill start address
   async function getCurrentLocationForStart() {
+    // First ensure we have location permissions
+    if (!permissionDetails.location) {
+      await enableLocation();
+      return; // enableLocation will start location tracking
+    }
+
     if (navigator.geolocation) {
       try {
         const position = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -285,6 +307,8 @@
         console.log('Current location set as start:', startAddress, startCoords);
       } catch (error) {
         console.error('Error getting current location:', error);
+        // If getCurrentPosition fails, try enabling location services
+        await enableLocation();
       }
     }
   }
@@ -319,8 +343,12 @@
       // Add click outside handler
       document.addEventListener('click', handleClickOutside);
 
-      // Try to get current location for start address
-      getCurrentLocationForStart();
+      // Try to enable location services and get current location automatically
+      try {
+        await enableLocation();
+      } catch (error) {
+        console.log('Auto-enable location failed, user can enable manually');
+      }
     }
   });
 
@@ -351,19 +379,49 @@
     }
   }
 
+  // Unified function to enable location (combines permissions + location tracking)
+  async function enableLocation() {
+    try {
+      // First request permissions
+      permissionsGranted = await sensorManager.requestPermissions();
+
+      // Update permission details
+      permissionDetails = {
+        accelerometer: sensorManager.accelerometerPermission,
+        location: sensorManager.locationPermission
+      };
+
+      // If location permission was granted, start location tracking to get current location
+      if (permissionDetails.location) {
+        // Start location tracking temporarily to get current location
+        sensorManager.startLocationTracking(handleLocationData);
+        console.log('Location tracking started');
+      } else {
+        alert('Location access is required for navigation features. Please grant location permissions.');
+      }
+
+      if (!permissionDetails.accelerometer) {
+        alert('Motion sensor access is required for pothole detection. Please grant motion sensor permissions.');
+      }
+    } catch (error) {
+      console.error('Error enabling location:', error);
+      alert('Failed to enable location services. Please check your browser settings.');
+    }
+  }
+
   function startSession() {
-    if (!permissionDetails.accelerometer && !permissionsGranted) {
-      alert('Motion sensor access is required for pothole detection. Please grant permissions first.');
+    if (!permissionDetails.accelerometer) {
+      alert('Motion sensor access is required for pothole detection. Please enable sensors first.');
       return;
     }
 
-    if (!currentLocation) {
-      alert('Location access is required for navigation. Please grant location permissions first.');
+    if (!permissionDetails.location) {
+      alert('Location access is required for navigation. Please enable location services first.');
       return;
     }
 
-    if (!destinationCoords) {
-      alert('Please select a destination address before starting your session.');
+    if (!startCoords || !destinationCoords) {
+      alert('Please select both start location and destination before starting your session.');
       return;
     }
 
@@ -555,8 +613,8 @@
       </div>
     </div>
 
-    <!-- Permissions Section -->
-    {#if !permissionsGranted}
+    <!-- Permissions Section - Only show if no permissions at all -->
+    {#if !permissionDetails.accelerometer && !permissionDetails.location}
       <div class="p-6 from-slate-700 via-gray-700 to-slate-800 border-4 border-blue-500">
         <div class="flex items-start">
           <div class="flex-shrink-0">
@@ -569,13 +627,13 @@
               This app needs access to your device's sensors to detect potholes effectively.
             </p>
             <button
-              on:click={requestPermissions}
+              on:click={enableLocation}
               class="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-3 rounded-xl text-sm font-semibold hover:from-blue-600 hover:to-purple-600 transition-all duration-200 transform hover:scale-105 shadow-lg flex items-center"
             >
               <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
               </svg>
-              Grant Permissions
+              Enable Sensors & Location
             </button>
           </div>
         </div>
@@ -651,7 +709,7 @@
             </div>
             <button
               type="button"
-              on:click={requestPermissions}
+              on:click={enableLocation}
               class="bg-yellow-600 hover:bg-yellow-700 text-white py-2 px-3 rounded-lg text-xs transition-colors duration-200"
             >
               Enable Location
@@ -877,81 +935,61 @@
           {/if}
         </div>
 
-        <!-- Navigation Map -->
-        {#if currentLocation}
-          {#if startCoords && destinationCoords}
-            <!-- Route Map with Directions -->
-            <div class="border-t border-gray-600 pt-4">
-              <div class="mb-2 p-2 bg-green-900 bg-opacity-30 rounded text-xs text-green-400 flex items-center">
-                <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                </svg>
-                Route ready for navigation
-              </div>
+        <!-- Dynamic Navigation Map - Only shows when route is ready -->
+        {#if startCoords && destinationCoords && directionsMapUrl}
+          <div class="border-t border-gray-600 pt-4">
+            <div class="mb-2 p-2 bg-green-900 bg-opacity-30 rounded text-xs text-green-400 flex items-center">
+              <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+              </svg>
+              📍 Route with Navigation
+            </div>
 
-              <!-- Navigation Map with Directions -->
-              <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden mb-4">
+            <!-- Dynamic Navigation Map -->
+            <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden mb-4">
+              {#key `${startAddress}-${destinationAddress}`}
                 <iframe
-                  src="https://www.google.com/maps/embed/v1/directions?key={GOOGLE_API_KEY}&origin={startCoords.lat},{startCoords.lng}&destination={destinationCoords.lat},{destinationCoords.lng}&mode=driving&avoid=tolls"
+                  src={directionsMapUrl}
                   class="w-full h-full border-0"
                   allowfullscreen
                   loading="lazy"
                   referrerpolicy="no-referrer-when-downgrade"
                   title="Google Maps - Navigation Route"
                 ></iframe>
-              </div>
-
-              <!-- Route Status -->
-              <div class="text-center p-3 bg-blue-900 bg-opacity-30 rounded-lg">
-                <div class="flex items-center justify-center text-blue-400 mb-2">
-                  <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                  </svg>
-                  <span class="font-medium">Route Ready</span>
-                </div>
-                <p class="text-blue-300 text-sm">
-                  🗺️ Your route is displayed above with turn-by-turn directions
-                </p>
-                <p class="text-blue-200 text-xs mt-1">
-                  Tap the map to interact or zoom for more details
-                </p>
-              </div>
-            </div>
-          {:else}
-            <!-- Current Location Map -->
-            <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden mb-4">
-              <iframe
-                src="https://www.google.com/maps/embed/v1/view?key={GOOGLE_API_KEY}&center={currentLocation.latitude},{currentLocation.longitude}&zoom=15&maptype=roadmap"
-                class="w-full h-full border-0"
-                allowfullscreen
-                loading="lazy"
-                referrerpolicy="no-referrer-when-downgrade"
-                title="Google Maps - Current Location"
-              ></iframe>
+              {/key}
             </div>
 
-            <!-- Instructions -->
-            <div class="text-center p-3 bg-blue-900 bg-opacity-20 rounded-lg">
+            <!-- Route Information -->
+            <div class="text-center p-3 bg-blue-900 bg-opacity-30 rounded-lg">
+              <div class="flex items-center justify-center text-blue-400 mb-2">
+                <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                </svg>
+                <span class="font-medium">Navigation Ready</span>
+              </div>
               <p class="text-blue-300 text-sm">
-                🔍 Search for your destination above to plan your route
+                🗺️ Route from {startAddress} to {destinationAddress}
+              </p>
+              <p class="text-blue-200 text-xs mt-1">
+                Interactive map with turn-by-turn directions
               </p>
             </div>
-          {/if}
+          </div>
         {:else}
-          <!-- Default Map -->
-          <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden">
-            <iframe
-              src="https://www.google.com/maps/embed/v1/view?key={GOOGLE_API_KEY}&center=40.7128,-74.0060&zoom=10&maptype=roadmap"
-              class="w-full h-full border-0"
-              allowfullscreen
-              loading="lazy"
-              referrerpolicy="no-referrer-when-downgrade"
-              title="Google Maps - Default View"
-            ></iframe>
+          <!-- Placeholder when no route is set -->
+          <div class="border-t border-gray-600 pt-4">
+            <div class="text-center p-6 bg-gray-700 bg-opacity-50 rounded-lg">
+              <svg class="w-12 h-12 mx-auto text-gray-400 mb-3" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
+              </svg>
+              <p class="text-gray-300 text-sm mb-2">No route selected</p>
+              <p class="text-gray-400 text-xs">
+                Set both start location and destination to view navigation map
+              </p>
+            </div>
           </div>
         {/if}
       </div>
-    </div>
     </div>
 
     <!-- Session Controls -->
@@ -960,7 +998,7 @@
         {#if sessionStatus === 'idle'}
           <button
             on:click={startSession}
-            disabled={!permissionDetails.accelerometer || !currentLocation || !destinationCoords}
+            disabled={!permissionDetails.accelerometer || !startCoords || !destinationCoords}
             class="w-full bg-gradient-to-r from-emerald-500 to-green-500 text-white py-4 px-6 rounded-xl font-semibold text-lg disabled:from-gray-600 disabled:to-gray-700 disabled:text-gray-400 hover:from-emerald-600 hover:to-green-600 transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 shadow-lg disabled:shadow-none flex items-center justify-center"
           >
             <svg class="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
@@ -972,13 +1010,17 @@
             <div class="text-center p-3 bg-gray-700 rounded-lg">
               <p class="text-sm text-gray-300">Motion sensor access required</p>
             </div>
-          {:else if !currentLocation}
+          {:else if !startCoords || !destinationCoords}
             <div class="text-center p-3 bg-gray-700 rounded-lg">
-              <p class="text-sm text-gray-300">Location access required for navigation</p>
-            </div>
-          {:else if !destinationCoords}
-            <div class="text-center p-3 bg-gray-700 rounded-lg">
-              <p class="text-sm text-gray-300">Select a destination address below</p>
+              <p class="text-sm text-gray-300">
+                {#if !startCoords && !destinationCoords}
+                  Set start location and destination to begin
+                {:else if !startCoords}
+                  Set start location to begin
+                {:else}
+                  Set destination to begin
+                {/if}
+              </p>
             </div>
           {/if}
         {:else}
@@ -1329,4 +1371,5 @@
       </div>
     </div>
   </div>
+</div>
 </div>
