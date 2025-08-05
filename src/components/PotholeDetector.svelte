@@ -922,39 +922,39 @@
     if (!currentDirectionsResult || !map) return;
 
     // Initialize speech synthesis
-    if (typeof window !== "undefined" && 'speechSynthesis' in window) {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       speechSynthesis = window.speechSynthesis;
     }
 
     // Wait for Google Maps to render the directions content
     setTimeout(() => {
-      const steps = panel.querySelectorAll('.adp-substep');
+      const steps = panel.querySelectorAll(".adp-substep");
       const route = currentDirectionsResult.routes[0];
-      
+
       if (route && route.legs && route.legs[0] && route.legs[0].steps) {
         const routeSteps = route.legs[0].steps;
 
         steps.forEach((stepElement, index) => {
           if (index < routeSteps.length) {
             const step = routeSteps[index];
-            
+
             // Add click handler to center map on this step
-            stepElement.addEventListener('click', () => {
+            stepElement.addEventListener("click", () => {
               if (step.start_location) {
                 map.setCenter({
                   lat: step.start_location.lat(),
-                  lng: step.start_location.lng()
+                  lng: step.start_location.lng(),
                 });
                 map.setZoom(18); // Close zoom for detailed view
-                
+
                 // Speak the instruction
                 speakInstruction(step.instructions);
               }
             });
 
             // Add hover effect and tooltip
-            stepElement.title = 'Click to view this step on map and hear audio';
-            stepElement.style.cursor = 'pointer';
+            stepElement.title = "Click to view this step on map and hear audio";
+            stepElement.style.cursor = "pointer";
           }
         });
       }
@@ -968,8 +968,8 @@
   function addAudioControls(panel: HTMLElement) {
     if (!speechSynthesis) return;
 
-    const audioControlsDiv = document.createElement('div');
-    audioControlsDiv.className = 'audio-controls';
+    const audioControlsDiv = document.createElement("div");
+    audioControlsDiv.className = "audio-controls";
     audioControlsDiv.innerHTML = `
       <div style="display: flex; gap: 8px; background: rgba(255,255,255,0.9); padding: 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
         <button id="speak-all-btn" style="background: #1a73e8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
@@ -984,14 +984,14 @@
     panel.appendChild(audioControlsDiv);
 
     // Add event listeners for audio controls
-    const speakAllBtn = audioControlsDiv.querySelector('#speak-all-btn');
-    const stopSpeechBtn = audioControlsDiv.querySelector('#stop-speech-btn');
+    const speakAllBtn = audioControlsDiv.querySelector("#speak-all-btn");
+    const stopSpeechBtn = audioControlsDiv.querySelector("#stop-speech-btn");
 
-    speakAllBtn?.addEventListener('click', () => {
+    speakAllBtn?.addEventListener("click", () => {
       speakAllDirections();
     });
 
-    stopSpeechBtn?.addEventListener('click', () => {
+    stopSpeechBtn?.addEventListener("click", () => {
       stopSpeech();
     });
   }
@@ -1004,17 +1004,19 @@
     speechSynthesis.cancel();
 
     // Clean HTML tags from instruction
-    const cleanInstruction = instruction.replace(/<[^>]*>/g, '');
-    
+    const cleanInstruction = instruction.replace(/<[^>]*>/g, "");
+
     const utterance = new SpeechSynthesisUtterance(cleanInstruction);
     utterance.rate = 0.9; // Slightly slower for clarity
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
-    
+
     // Use a clear voice if available
     const voices = speechSynthesis.getVoices();
-    const preferredVoice = voices.find(voice =>
-      voice.lang.includes('en') && (voice.name.includes('Google') || voice.name.includes('Microsoft'))
+    const preferredVoice = voices.find(
+      (voice) =>
+        voice.lang.includes("en") &&
+        (voice.name.includes("Google") || voice.name.includes("Microsoft"))
     );
     if (preferredVoice) {
       utterance.voice = preferredVoice;
@@ -1039,8 +1041,8 @@
       if (stepIndex >= steps.length) return;
 
       const step = steps[stepIndex];
-      const cleanInstruction = step.instructions.replace(/<[^>]*>/g, '');
-      
+      const cleanInstruction = step.instructions.replace(/<[^>]*>/g, "");
+
       const utterance = new SpeechSynthesisUtterance(cleanInstruction);
       utterance.rate = 0.9;
       utterance.pitch = 1.0;
@@ -1048,8 +1050,10 @@
 
       // Use a clear voice if available
       const voices = speechSynthesis.getVoices();
-      const preferredVoice = voices.find(voice =>
-        voice.lang.includes('en') && (voice.name.includes('Google') || voice.name.includes('Microsoft'))
+      const preferredVoice = voices.find(
+        (voice) =>
+          voice.lang.includes("en") &&
+          (voice.name.includes("Google") || voice.name.includes("Microsoft"))
       );
       if (preferredVoice) {
         utterance.voice = preferredVoice;
