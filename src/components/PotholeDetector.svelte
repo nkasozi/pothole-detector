@@ -45,25 +45,29 @@
   let placesService: google.maps.places.PlacesService | null = null;
   let searchInput: HTMLInputElement;
 
+  // Full Google Maps SDK variables
+  let map: google.maps.Map | null = null;
+  let directionsService: google.maps.DirectionsService | null = null;
+  let directionsRenderer: google.maps.DirectionsRenderer | null = null;
+  let mapContainer: HTMLElement;
+  let currentLocationMarker: google.maps.Marker | null = null;
+  let potholeMarkers: google.maps.Marker[] = [];
+  let navigationStarted = false;
+
   const GOOGLE_API_KEY = 'AIzaSyDQLELMbxd-S1RIWw_zCWt6TD_QaqpdsM4';
 
-  // Reactive map URL for directions - only when both locations are set
-  $: directionsMapUrl = startCoords && destinationCoords && startAddress && destinationAddress
-    ? `https://www.google.com/maps/embed/v1/directions?key=${GOOGLE_API_KEY}&origin=${encodeURIComponent(startAddress)}&destination=${encodeURIComponent(destinationAddress)}&mode=driving&avoid=tolls`
-    : null;
-
-  // Debug log for map URL changes
-  $: if (directionsMapUrl) {
-    console.log('Directions map URL updated:', directionsMapUrl);
+  // Reactive statements for map management
+  $: if (map && currentLocation) {
+    updateCurrentLocationMarker();
   }
 
-  // Current location map URL
-  $: currentLocationMapUrl = currentLocation
-    ? `https://www.google.com/maps/embed/v1/view?key=${GOOGLE_API_KEY}&center=${currentLocation.latitude},${currentLocation.longitude}&zoom=15&maptype=roadmap`
-    : `https://www.google.com/maps/embed/v1/view?key=${GOOGLE_API_KEY}&center=40.7128,-74.0060&zoom=10&maptype=roadmap`;
+  // Initialize map when container is available
+  $: if (mapContainer && !map && typeof google !== 'undefined') {
+    initializeMap();
+  }
 
   // Automatically trigger route planning when both coordinates are available
-  $: if (startCoords && destinationCoords && !routePlanned) {
+  $: if (startCoords && destinationCoords && map && !routePlanned) {
     planRoute();
   }
 
@@ -77,8 +81,8 @@
   // Check if location is available for route planning
   $: routePlanned = currentLocation !== null && destinationCoords !== null;
 
-  // Initialize Google Places API
-  function initializeGooglePlaces() {
+  // Initialize Google Places API and Maps SDK
+  function initializeGoogleMaps() {
     // Only run in browser
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return;
@@ -87,21 +91,67 @@
     // Load the Google Maps JavaScript API
     if (typeof google === 'undefined') {
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_API_KEY}&libraries=places&callback=initPlacesCallback`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_API_KEY}&libraries=places&callback=initMapsCallback`;
       script.async = true;
       script.defer = true;
 
       // Set up global callback
-      (window as any).initPlacesCallback = () => {
+      (window as any).initMapsCallback = () => {
         autocompleteService = new google.maps.places.AutocompleteService();
-        console.log('Google Places API initialized');
+        directionsService = new google.maps.DirectionsService();
+        directionsRenderer = new google.maps.DirectionsRenderer({
+          draggable: true,
+          panel: null
+        });
+        console.log('Google Maps API initialized');
+        initializeMap();
       };
 
       document.head.appendChild(script);
     } else if (google.maps?.places) {
       autocompleteService = new google.maps.places.AutocompleteService();
-      console.log('Google Places API already loaded');
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer({
+        draggable: true,
+        panel: null
+      });
+      console.log('Google Maps API already loaded');
+      initializeMap();
     }
+  }
+
+  // Initialize the interactive map
+  function initializeMap() {
+    if (!mapContainer || map) return;
+
+    // Default center (will be updated when location is available)
+    const center = currentLocation
+      ? { lat: currentLocation.latitude, lng: currentLocation.longitude }
+      : { lat: 40.7128, lng: -74.0060 }; // NYC default
+
+    map = new google.maps.Map(mapContainer, {
+      zoom: 15,
+      center: center,
+      mapTypeId: google.maps.MapTypeId.ROADMAP,
+      zoomControl: true,
+      mapTypeControl: true,
+      streetViewControl: true,
+      fullscreenControl: true,
+      styles: [
+        {
+          featureType: "poi",
+          elementType: "labels",
+          stylers: [{ visibility: "off" }]
+        }
+      ]
+    });
+
+    if (directionsRenderer) {
+      directionsRenderer.setMap(map);
+    }
+
+    mapInitialized = true;
+    console.log('Interactive map initialized');
   }
 
   // Search for places using Google Places API
@@ -252,17 +302,144 @@
     routePlanned = false;
   }
 
-  // Plan route between start and destination
+  // Plan route between start and destination using full Google Maps SDK
   async function planRoute() {
-    if (!startCoords || !destinationCoords) {
-      console.log('Both start and destination required for route planning');
+    if (!startCoords || !destinationCoords || !directionsService || !directionsRenderer || !map) {
+      console.log('Missing requirements for route planning');
       return;
     }
 
-    console.log('Planning route from', startCoords, 'to', destinationCoords);
-    console.log('Route displayed in iframe with directions');
+    try {
+      const request: google.maps.DirectionsRequest = {
+        origin: startCoords,
+        destination: destinationCoords,
+        travelMode: google.maps.TravelMode.DRIVING,
+        avoidTolls: true,
+        optimizeWaypoints: true
+      };
 
-    routePlanned = true;
+      const result = await new Promise<google.maps.DirectionsResult>((resolve, reject) => {
+        directionsService!.route(request, (result, status) => {
+          if (status === google.maps.DirectionsStatus.OK && result) {
+            resolve(result);
+          } else {
+            reject(new Error(`Directions request failed: ${status}`));
+          }
+        });
+      });
+
+      directionsRenderer.setDirections(result);
+      routePlanned = true;
+
+      console.log('Route planned successfully with Google Maps SDK');
+      console.log('Distance:', result.routes[0].legs[0].distance?.text);
+      console.log('Duration:', result.routes[0].legs[0].duration?.text);
+
+      // Start navigation if both locations are set
+      if (navigationStarted) {
+        startTurnByTurnNavigation();
+      }
+
+    } catch (error) {
+      console.error('Error planning route:', error);
+      alert('Failed to plan route. Please check your locations and try again.');
+    }
+  }
+
+  // Start turn-by-turn navigation
+  function startTurnByTurnNavigation() {
+    if (!map || !directionsRenderer) return;
+
+    navigationStarted = true;
+
+    // Enable turn-by-turn guidance panel
+    const directionsPanel = document.getElementById('directions-panel');
+    if (directionsPanel) {
+      directionsRenderer.setPanel(directionsPanel);
+    }
+
+    // Set up navigation-optimized map options
+    map.setOptions({
+      zoom: 18,
+      mapTypeId: google.maps.MapTypeId.ROADMAP,
+      zoomControl: false,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: false
+    });
+
+    console.log('Turn-by-turn navigation started');
+  }
+
+  // Update current location marker on the map
+  function updateCurrentLocationMarker() {
+    if (!map || !currentLocation) return;
+
+    // Remove existing marker
+    if (currentLocationMarker) {
+      currentLocationMarker.setMap(null);
+    }
+
+    // Create new marker for current location
+    currentLocationMarker = new google.maps.Marker({
+      position: { lat: currentLocation.latitude, lng: currentLocation.longitude },
+      map: map,
+      title: 'Your Location',
+      icon: {
+        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="8" fill="#4285F4" stroke="#ffffff" stroke-width="2"/>
+            <circle cx="12" cy="12" r="3" fill="#ffffff"/>
+          </svg>
+        `),
+        scaledSize: new google.maps.Size(24, 24),
+        anchor: new google.maps.Point(12, 12)
+      }
+    });
+
+    // Center map on current location during navigation
+    if (navigationStarted) {
+      map.setCenter({ lat: currentLocation.latitude, lng: currentLocation.longitude });
+    }
+  }
+
+  // Add pothole marker to the map
+  function addPotholeMarker(event: PotholeEvent) {
+    if (!map || !event.location) return;
+
+    const marker = new google.maps.Marker({
+      position: { lat: event.location.latitude, lng: event.location.longitude },
+      map: map,
+      title: `Pothole (${event.severity})`,
+      icon: {
+        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="10" cy="10" r="8" fill="#FF4444" stroke="#ffffff" stroke-width="2"/>
+            <text x="10" y="14" text-anchor="middle" fill="white" font-size="12" font-weight="bold">!</text>
+          </svg>
+        `),
+        scaledSize: new google.maps.Size(20, 20),
+        anchor: new google.maps.Point(10, 10)
+      }
+    });
+
+    // Add info window
+    const infoWindow = new google.maps.InfoWindow({
+      content: `
+        <div>
+          <h3>Pothole Detected</h3>
+          <p>Severity: ${event.severity}</p>
+          <p>Speed: ${event.speed ? Math.round(event.speed * 3.6) : 'Unknown'} km/h</p>
+          <p>Time: ${new Date(event.timestamp).toLocaleTimeString()}</p>
+        </div>
+      `
+    });
+
+    marker.addListener('click', () => {
+      infoWindow.open(map, marker);
+    });
+
+    potholeMarkers.push(marker);
   }
 
   // Get user's current location and prefill start address
@@ -337,8 +514,8 @@
         }
       }
 
-      // Initialize Google Places API
-      initializeGooglePlaces();
+      // Initialize Google Maps API
+      initializeGoogleMaps();
 
       // Add click outside handler
       document.addEventListener('click', handleClickOutside);
@@ -448,6 +625,9 @@
     // Start sensors
     sensorManager.startAccelerometer(handleAccelerometerData);
     sensorManager.startLocationTracking(handleLocationData);
+
+    // Start turn-by-turn navigation
+    startTurnByTurnNavigation();
   }
 
   function stopSession() {
@@ -463,6 +643,25 @@
 
     // Stop sensors
     sensorManager.stopAllSensors();
+
+    // Stop navigation
+    navigationStarted = false;
+
+    // Reset map view to normal
+    if (map) {
+      map.setOptions({
+        zoom: 15,
+        zoomControl: true,
+        mapTypeControl: true,
+        streetViewControl: true,
+        fullscreenControl: true
+      });
+
+      // Clear directions panel
+      if (directionsRenderer) {
+        directionsRenderer.setPanel(null);
+      }
+    }
 
     // Clear timer
     if (sessionTimer) {
@@ -500,6 +699,9 @@
 
       // Force reactivity by creating a new reference
       currentSession = { ...currentSession, events: [...currentSession.events] };
+
+      // Add pothole marker to the map
+      addPotholeMarker(event);
 
       console.log('Pothole detected! Total events:', eventsCount, 'Session events:', currentSession.events.length);
 
@@ -935,28 +1137,61 @@
           {/if}
         </div>
 
-        <!-- Dynamic Navigation Map - Only shows when route is ready -->
-        {#if startCoords && destinationCoords && directionsMapUrl}
+        <!-- Dynamic Interactive Map - Only shows when route is ready -->
+        {#if startCoords && destinationCoords}
           <div class="border-t border-gray-600 pt-4">
             <div class="mb-2 p-2 bg-green-900 bg-opacity-30 rounded text-xs text-green-400 flex items-center">
               <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
               </svg>
-              📍 Route with Navigation
+              📍 Interactive Navigation Map
             </div>
 
-            <!-- Dynamic Navigation Map -->
-            <div class="relative w-full h-80 bg-gray-600 rounded-lg overflow-hidden mb-4">
-              {#key `${startAddress}-${destinationAddress}`}
-                <iframe
-                  src={directionsMapUrl}
-                  class="w-full h-full border-0"
-                  allowfullscreen
-                  loading="lazy"
-                  referrerpolicy="no-referrer-when-downgrade"
-                  title="Google Maps - Navigation Route"
-                ></iframe>
-              {/key}
+            <!-- Interactive Google Map Container -->
+            <div class="relative w-full h-96 bg-gray-800 rounded-lg overflow-hidden mb-4 border border-gray-600">
+              <div
+                bind:this={mapContainer}
+                class="w-full h-full"
+                id="map"
+              ></div>
+
+              <!-- Navigation Controls Overlay -->
+              {#if map && !navigationStarted}
+                <div class="absolute top-4 left-4 right-4 z-10">
+                  <button
+                    on:click={startTurnByTurnNavigation}
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg font-semibold text-sm shadow-lg flex items-center justify-center transition-colors duration-200"
+                  >
+                    <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
+                    </svg>
+                    Start Turn-by-Turn Navigation
+                  </button>
+                </div>
+              {/if}
+
+              <!-- Turn-by-Turn Directions Panel -->
+              {#if navigationStarted}
+                <div class="absolute top-4 right-4 w-80 max-h-80 bg-white rounded-lg shadow-xl overflow-hidden z-10">
+                  <div class="bg-blue-600 text-white p-3">
+                    <h3 class="font-semibold text-sm">Turn-by-Turn Directions</h3>
+                  </div>
+                  <div
+                    id="directions-panel"
+                    class="p-2 text-sm max-h-64 overflow-y-auto"
+                  ></div>
+                </div>
+              {/if}
+
+              <!-- Map Loading Indicator -->
+              {#if !mapInitialized}
+                <div class="absolute inset-0 flex items-center justify-center bg-gray-800">
+                  <div class="text-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400 mx-auto mb-2"></div>
+                    <p class="text-gray-400 text-sm">Loading Interactive Map...</p>
+                  </div>
+                </div>
+              {/if}
             </div>
 
             <!-- Route Information -->
@@ -965,13 +1200,13 @@
                 <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                   <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                 </svg>
-                <span class="font-medium">Navigation Ready</span>
+                <span class="font-medium">Interactive Navigation Ready</span>
               </div>
               <p class="text-blue-300 text-sm">
                 🗺️ Route from {startAddress} to {destinationAddress}
               </p>
               <p class="text-blue-200 text-xs mt-1">
-                Interactive map with turn-by-turn directions
+                Full Google Maps with turn-by-turn navigation, real-time traffic, and pothole markers
               </p>
             </div>
           </div>
