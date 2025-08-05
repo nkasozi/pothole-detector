@@ -54,11 +54,14 @@
   let destinationCoords: { lat: number; lng: number } | null = null;
   let destinationSuggestions: google.maps.places.AutocompletePrediction[] = [];
   let showDestinationSuggestions = false;
-  let autocompleteService: google.maps.places.AutocompleteService | null = null;
-  let placesService: google.maps.places.PlacesService | null = null;
   let searchInput: HTMLInputElement;
 
-  // Full Google Maps SDK variables
+  // Loading states for better UX
+  let directionsLoading = false;
+  let placesLoading = false;
+
+  // Debounce timers for search optimization
+  let searchTimeout: number; // Full Google Maps SDK variables
   let map: google.maps.Map | null = null;
   let directionsService: google.maps.DirectionsService | null = null;
   let directionsRenderer: google.maps.DirectionsRenderer | null = null;
@@ -114,7 +117,6 @@
 
       // Set up global callback
       (window as any).initMapsCallback = () => {
-        autocompleteService = new google.maps.places.AutocompleteService();
         directionsService = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer({
           draggable: false,
@@ -141,13 +143,14 @@
             },
           },
         });
-        console.log("Google Maps API initialized");
+        console.log(
+          "Google Maps API initialized with new AutocompleteSuggestion API"
+        );
         initializeMap();
       };
 
       document.head.appendChild(script);
     } else if (google.maps?.places) {
-      autocompleteService = new google.maps.places.AutocompleteService();
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer({
         draggable: false,
@@ -174,7 +177,9 @@
           },
         },
       });
-      console.log("Google Maps API already loaded");
+      console.log(
+        "Google Maps API already loaded with new AutocompleteSuggestion API"
+      );
       initializeMap();
     }
   }
@@ -213,9 +218,14 @@
     console.log("Interactive map initialized");
   }
 
-  // Search for places using Google Places API
+  // Search for places using AutocompleteSuggestion API with debouncing
   async function searchPlaces(query: string, isDestination: boolean = true) {
-    if (!autocompleteService || !query || query.length < 3) {
+    // Clear existing timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    if (!query || query.length < 3) {
       if (isDestination) {
         destinationSuggestions = [];
         showDestinationSuggestions = false;
@@ -226,20 +236,81 @@
       return;
     }
 
-    try {
-      const request: google.maps.places.AutocompletionRequest = {
-        input: query,
-        types: ["geocode", "establishment"],
-        // No country restrictions - search worldwide
-      };
+    // Debounce the search to reduce API calls
+    searchTimeout = setTimeout(async () => {
+      try {
+        const request = {
+          input: query,
+          sessionToken: new google.maps.places.AutocompleteSessionToken(),
+          includedPrimaryTypes: ["establishment", "geocode"],
+          language: "en",
+        };
 
-      autocompleteService.getPlacePredictions(
-        request,
-        (predictions, status) => {
-          if (
-            status === google.maps.places.PlacesServiceStatus.OK &&
-            predictions
-          ) {
+        // Use the new AutocompleteSuggestion API
+        const { suggestions } =
+          await google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions(
+            request
+          );
+
+        // Convert suggestions to the format expected by the UI
+        const predictions =
+          suggestions?.map((suggestion) => ({
+            place_id: suggestion.placePrediction?.placeId || "",
+            description: suggestion.placePrediction?.text?.text || "",
+            structured_formatting: {
+              main_text:
+                suggestion.placePrediction?.structuredFormat?.mainText?.text ||
+                "",
+              secondary_text:
+                suggestion.placePrediction?.structuredFormat?.secondaryText
+                  ?.text || "",
+            },
+            // Add other properties that might be expected
+            terms:
+              suggestion.placePrediction?.text?.text
+                ?.split(",")
+                .map((term, index) => ({
+                  offset: 0,
+                  value: term.trim(),
+                })) || [],
+            types: ["establishment"],
+          })) || [];
+
+        if (isDestination) {
+          destinationSuggestions = predictions;
+          showDestinationSuggestions = true;
+        } else {
+          startSuggestions = predictions;
+          showStartSuggestions = true;
+        }
+      } catch (error) {
+        console.error("AutocompleteSuggestion API error:", error);
+
+        // Fallback to geocoding service if AutocompleteSuggestion fails
+        try {
+          const geocoder = new google.maps.Geocoder();
+          const results = await geocoder.geocode({ address: query });
+
+          if (results.results && results.results.length > 0) {
+            const predictions = results.results
+              .slice(0, 5)
+              .map((result, index) => ({
+                place_id: result.place_id || `geocoded_${index}`,
+                description: result.formatted_address || "",
+                structured_formatting: {
+                  main_text: result.formatted_address?.split(",")[0] || "",
+                  secondary_text:
+                    result.formatted_address?.split(",").slice(1).join(",") ||
+                    "",
+                },
+                terms:
+                  result.formatted_address?.split(",").map((term, index) => ({
+                    offset: 0,
+                    value: term.trim(),
+                  })) || [],
+                types: ["geocode"],
+              }));
+
             if (isDestination) {
               destinationSuggestions = predictions;
               showDestinationSuggestions = true;
@@ -256,65 +327,92 @@
               showStartSuggestions = false;
             }
           }
+        } catch (geocodeError) {
+          console.error("Geocoding fallback also failed:", geocodeError);
+          if (isDestination) {
+            destinationSuggestions = [];
+            showDestinationSuggestions = false;
+          } else {
+            startSuggestions = [];
+            showStartSuggestions = false;
+          }
         }
-      );
-    } catch (error) {
-      console.error("Places API error:", error);
-      if (isDestination) {
-        destinationSuggestions = [];
-        showDestinationSuggestions = false;
-      } else {
-        startSuggestions = [];
-        showStartSuggestions = false;
       }
-    }
+    }, 300); // 300ms debounce
   }
 
-  // Get place details from place ID
+  // Get place details using the new Places API (replaces deprecated PlacesService)
   async function getPlaceDetails(
     placeId: string
   ): Promise<{ lat: number; lng: number } | null> {
-    return new Promise((resolve) => {
+    try {
+      placesLoading = true;
+
       // Only run in browser
       if (typeof window === "undefined" || typeof document === "undefined") {
-        resolve(null);
-        return;
+        return null;
       }
 
-      if (!google?.maps?.places) {
-        resolve(null);
-        return;
+      if (!google?.maps?.places?.Place) {
+        console.error("New Places API not available");
+        return null;
       }
 
-      // Create a temporary map element for PlacesService
-      const mapDiv = document.createElement("div");
-      const map = new google.maps.Map(mapDiv, {
-        center: { lat: 0, lng: 0 },
-        zoom: 1,
+      // Use the new Places API
+      const place = new google.maps.places.Place({
+        id: placeId,
+        requestedLanguage: "en",
       });
-      const service = new google.maps.places.PlacesService(map);
 
-      const request: google.maps.places.PlaceDetailsRequest = {
-        placeId: placeId,
-        fields: ["geometry"],
-      };
+      // Fetch the place details
+      await place.fetchFields({
+        fields: ["location"],
+      });
 
-      service.getDetails(request, (place, status) => {
-        if (
-          status === google.maps.places.PlacesServiceStatus.OK &&
-          place?.geometry?.location
-        ) {
-          const location = place.geometry.location;
-          resolve({
-            lat: location.lat(),
-            lng: location.lng(),
-          });
-        } else {
-          console.error("Place details error:", status);
-          resolve(null);
+      if (place.location) {
+        return {
+          lat: place.location.lat(),
+          lng: place.location.lng(),
+        };
+      } else {
+        console.error("No location found for place");
+        return null;
+      }
+    } catch (error) {
+      console.error("Error getting place details with new API:", error);
+
+      // Fallback to geocoding if the new API fails
+      try {
+        if (typeof window !== "undefined" && window.google) {
+          const geocoder = new google.maps.Geocoder();
+          const response = await new Promise<google.maps.GeocoderResponse>(
+            (resolve, reject) => {
+              geocoder.geocode({ placeId: placeId }, (results, status) => {
+                if (status === "OK" && results && results[0]) {
+                  resolve({ results });
+                } else {
+                  reject(new Error(`Geocoding failed: ${status}`));
+                }
+              });
+            }
+          );
+
+          if (response.results && response.results[0]) {
+            const location = response.results[0].geometry.location;
+            return {
+              lat: location.lat(),
+              lng: location.lng(),
+            };
+          }
         }
-      });
-    });
+      } catch (fallbackError) {
+        console.error("Geocoding fallback also failed:", fallbackError);
+      }
+
+      return null;
+    } finally {
+      placesLoading = false;
+    }
   }
 
   // Handle destination search input
@@ -336,6 +434,7 @@
     routePlanned = false; // Reset route planning state
 
     try {
+      placesLoading = true;
       destinationCoords = await getPlaceDetails(prediction.place_id);
       console.log(
         "Destination selected:",
@@ -345,6 +444,9 @@
     } catch (error) {
       console.error("Error getting place details:", error);
       destinationCoords = null;
+      alert(
+        "Failed to get location details. Please try selecting a different location."
+      );
     }
   }
 
@@ -357,11 +459,15 @@
     routePlanned = false; // Reset route planning state
 
     try {
+      placesLoading = true;
       startCoords = await getPlaceDetails(prediction.place_id);
       console.log("Start location selected:", startAddress, startCoords);
     } catch (error) {
       console.error("Error getting place details:", error);
       startCoords = null;
+      alert(
+        "Failed to get location details. Please try selecting a different location."
+      );
     }
   }
 
@@ -383,7 +489,7 @@
     routePlanned = false;
   }
 
-  // Plan route between start and destination using full Google Maps SDK
+  // Plan route between start and destination using optimized Google Maps SDK
   async function planRoute() {
     if (
       !startCoords ||
@@ -396,6 +502,9 @@
       return;
     }
 
+    directionsLoading = true;
+    console.log("Starting route planning...");
+
     try {
       const request: google.maps.DirectionsRequest = {
         origin: startCoords,
@@ -404,31 +513,45 @@
         avoidTolls: false, // Allow tolls for better navigation like Google Maps
         avoidHighways: false,
         avoidFerries: true,
-        optimizeWaypoints: true,
+        optimizeWaypoints: false, // Disable for faster response
         // Request detailed step information for turn-by-turn navigation
         provideRouteAlternatives: false, // Focus on single best route for navigation
         unitSystem: google.maps.UnitSystem.METRIC,
       };
 
-      const result = await new Promise<google.maps.DirectionsResult>(
-        (resolve, reject) => {
+      // Add timeout for directions request to prevent hanging
+      const result = await Promise.race([
+        new Promise<google.maps.DirectionsResult>((resolve, reject) => {
           directionsService!.route(request, (result, status) => {
+            console.log("Directions API response status:", status);
             if (status === google.maps.DirectionsStatus.OK && result) {
+              console.log("Directions received successfully");
               resolve(result);
             } else {
               reject(new Error(`Directions request failed: ${status}`));
             }
           });
-        }
-      );
+        }),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("Directions request timed out after 10 seconds"));
+          }, 10000);
+        }),
+      ]);
 
+      // Clear any existing route first
+      directionsRenderer.setDirections({ routes: [] } as any);
+
+      // Set the new directions
       directionsRenderer.setDirections(result);
       routePlanned = true;
 
-      // Fit the map to show the entire route initially
+      // Fit the map to show the entire route initially (with better bounds)
       const route = result.routes[0];
       if (route && route.bounds) {
-        map.fitBounds(route.bounds, { padding: 50 });
+        map.fitBounds(route.bounds, {
+          padding: { top: 50, bottom: 50, left: 50, right: 50 },
+        });
       }
 
       console.log("Route planned successfully with Google Maps SDK");
@@ -436,13 +559,35 @@
       console.log("Duration:", result.routes[0].legs[0].duration?.text);
       console.log("Steps:", result.routes[0].legs[0].steps?.length);
 
-      // Start navigation if both locations are set
+      // Start navigation if it was requested
       if (navigationStarted) {
-        startTurnByTurnNavigation();
+        setTimeout(() => {
+          startTurnByTurnNavigation();
+        }, 500); // Small delay to ensure directions are rendered
       }
     } catch (error) {
       console.error("Error planning route:", error);
-      alert("Failed to plan route. Please check your locations and try again.");
+
+      // More specific error handling
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      if (errorMessage.includes("timeout")) {
+        alert(
+          "Route planning is taking too long. Please try again or check your internet connection."
+        );
+      } else if (errorMessage.includes("ZERO_RESULTS")) {
+        alert(
+          "No route found between these locations. Please try different locations."
+        );
+      } else if (errorMessage.includes("OVER_QUERY_LIMIT")) {
+        alert("Too many requests. Please wait a moment and try again.");
+      } else {
+        alert(
+          `Failed to plan route: ${errorMessage}. Please check your locations and try again.`
+        );
+      }
+    } finally {
+      directionsLoading = false;
     }
   }
 
@@ -452,38 +597,74 @@
 
     navigationStarted = true;
 
-    // Enable turn-by-turn guidance panel with enhanced styling
-    const directionsPanel = document.getElementById("directions-panel");
-    if (directionsPanel) {
-      directionsRenderer.setPanel(directionsPanel);
-
-      // Style the directions panel to look like Google Maps
-      setTimeout(() => {
-        styleDirectionsPanel(directionsPanel);
-      }, 100);
-
-      // Configure DirectionsRenderer for navigation mode
-      directionsRenderer.setOptions({
-        suppressMarkers: false,
-        suppressInfoWindows: false,
-        preserveViewport: false,
-        draggable: false,
-        markerOptions: {
-          icon: {
-            url:
-              "data:image/svg+xml;charset=UTF-8," +
-              encodeURIComponent(`
-              <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="16" cy="16" r="14" fill="#4285F4" stroke="#ffffff" stroke-width="2"/>
-                <path d="M16 8L20 14H18V20H14V14H12L16 8Z" fill="#ffffff"/>
-              </svg>
-            `),
-            scaledSize: new google.maps.Size(32, 32),
-            anchor: new google.maps.Point(16, 16),
-          },
-        },
-      });
+    // If route isn't planned yet, plan it first
+    if (!routePlanned && startCoords && destinationCoords) {
+      console.log("Route not planned yet, planning route first...");
+      planRoute();
+      return; // planRoute will call this function again when done
     }
+
+    // Wait for the panel to be rendered in the DOM
+    setTimeout(() => {
+      const directionsPanel = document.getElementById("directions-panel");
+      if (directionsPanel) {
+        console.log("Setting directions panel...");
+
+        // Clear the panel first
+        directionsPanel.innerHTML = "";
+
+        // Set the panel on the renderer
+        directionsRenderer.setPanel(directionsPanel);
+
+        // Get current directions and re-apply them to ensure they show in panel
+        const currentDirections = directionsRenderer.getDirections();
+        if (
+          currentDirections &&
+          currentDirections.routes &&
+          currentDirections.routes.length > 0
+        ) {
+          console.log("Re-applying directions to panel...");
+          // Force re-render by temporarily clearing and re-setting
+          directionsRenderer.setDirections(null);
+          setTimeout(() => {
+            directionsRenderer.setDirections(currentDirections);
+          }, 50);
+        } else {
+          console.log("No current directions found, may need to re-plan route");
+          directionsPanel.innerHTML =
+            '<div class="p-4 text-gray-600">Directions will appear here once route is calculated...</div>';
+        }
+
+        // Style the directions panel to look like Google Maps
+        setTimeout(() => {
+          styleDirectionsPanel(directionsPanel);
+        }, 200);
+      } else {
+        console.error("Directions panel not found in DOM");
+      }
+    }, 100); // Wait for Svelte to render the panel
+
+    // Configure DirectionsRenderer for navigation mode
+    directionsRenderer.setOptions({
+      suppressMarkers: false,
+      suppressInfoWindows: false,
+      preserveViewport: false,
+      draggable: false,
+      markerOptions: {
+        icon: {
+          url:
+            "data:image/svg+xml;charset=UTF-8," +
+            encodeURIComponent(`
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="16" cy="16" r="14" fill="#4285F4" stroke="#ffffff" stroke-width="2"/>
+              <path d="M16 8L20 14H18V20H14V14H12L16 8Z" fill="#ffffff"/>
+            </svg>
+          `),
+          scaledSize: new google.maps.Size(32, 32),
+          anchor: new google.maps.Point(16, 16),
+        },
+      },
+    });
 
     // Center and zoom to start location like Google Maps app
     map.setCenter(startCoords);
@@ -906,6 +1087,9 @@
     }
     if (sessionTimer) {
       clearInterval(sessionTimer);
+    }
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
     }
     // Remove click outside handler (only in browser)
     if (typeof document !== "undefined") {
@@ -1621,7 +1805,27 @@
             {/if}
 
             <!-- Route Planning Status -->
-            {#if startCoords && destinationCoords}
+            {#if directionsLoading}
+              <div
+                class="p-3 bg-blue-900 bg-opacity-30 rounded-lg border border-blue-600"
+              >
+                <div class="flex items-center text-blue-400">
+                  <div
+                    class="animate-spin rounded-full h-4 w-4 border-2 border-blue-400 border-t-transparent mr-2"
+                  ></div>
+                  <span class="text-sm font-medium">Planning Route...</span>
+                </div>
+                <div class="text-blue-300 text-xs mt-1">
+                  From: {startAddress}
+                </div>
+                <div class="text-blue-300 text-xs">
+                  To: {destinationAddress}
+                </div>
+                <div class="text-blue-200 text-xs mt-1 italic">
+                  ⏳ Calculating optimal route with traffic data...
+                </div>
+              </div>
+            {:else if startCoords && destinationCoords && routePlanned}
               <div
                 class="p-3 bg-purple-900 bg-opacity-30 rounded-lg border border-purple-600"
               >
@@ -1647,6 +1851,30 @@
                 </div>
                 <div class="text-purple-200 text-xs mt-1 italic">
                   🗺️ Route displayed in map below
+                </div>
+              </div>
+            {:else if startCoords && destinationCoords}
+              <div
+                class="p-3 bg-orange-900 bg-opacity-30 rounded-lg border border-orange-600"
+              >
+                <div class="flex items-center text-orange-400">
+                  <svg
+                    class="w-4 h-4 mr-2"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                  <span class="text-sm font-medium"
+                    >Route Planning Required</span
+                  >
+                </div>
+                <div class="text-orange-300 text-xs mt-1">
+                  Both locations set - route will be calculated automatically
                 </div>
               </div>
             {:else if startCoords || destinationCoords}
@@ -1716,20 +1944,28 @@
                   <div class="absolute top-4 left-4 right-4 z-10">
                     <button
                       on:click={startTurnByTurnNavigation}
-                      class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg font-semibold text-sm shadow-lg flex items-center justify-center transition-colors duration-200"
+                      disabled={directionsLoading}
+                      class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-semibold text-sm shadow-lg flex items-center justify-center transition-colors duration-200"
                     >
-                      <svg
-                        class="w-5 h-5 mr-2"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
-                      Start Turn-by-Turn Navigation
+                      {#if directionsLoading}
+                        <div
+                          class="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-2"
+                        ></div>
+                        Loading Navigation...
+                      {:else}
+                        <svg
+                          class="w-5 h-5 mr-2"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fill-rule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                            clip-rule="evenodd"
+                          />
+                        </svg>
+                        Start Turn-by-Turn Navigation
+                      {/if}
                     </button>
                   </div>
                 {/if}
