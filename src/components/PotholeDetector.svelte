@@ -609,6 +609,26 @@
       return; // planRoute will call this function again when done
     }
 
+    // Double-check that we have directions result
+    if (!currentDirectionsResult) {
+      console.log(
+        "No currentDirectionsResult, attempting to get from renderer..."
+      );
+      const rendererDirections = directionsRenderer.getDirections();
+      if (
+        rendererDirections &&
+        rendererDirections.routes &&
+        rendererDirections.routes.length > 0
+      ) {
+        currentDirectionsResult = rendererDirections;
+        console.log("Retrieved directions from renderer");
+      } else {
+        console.log("No directions available, re-planning route...");
+        planRoute();
+        return;
+      }
+    }
+
     // Wait for the panel to be rendered in the DOM with more retries for mobile
     const setupDirectionsPanel = () => {
       const directionsPanel = document.getElementById("directions-panel");
@@ -629,15 +649,22 @@
           currentDirections.routes.length > 0
         ) {
           console.log("Re-applying directions to panel...");
-          // Show status in panel
+          // Show status in panel with more details
           directionsPanel.innerHTML = `
             <div class="p-4 text-blue-600 bg-blue-50 rounded">
               <div class="font-medium">📍 Loading Turn-by-Turn Directions...</div>
               <div class="text-sm mt-1">Routes found: ${currentDirections.routes.length}</div>
               <div class="text-sm">Steps: ${currentDirections.routes[0]?.legs?.[0]?.steps?.length || "Unknown"}</div>
+              <div class="text-sm">Current Directions Result: ${currentDirectionsResult ? "Available" : "Missing"}</div>
               <div class="text-xs mt-2 text-gray-600">Device: ${window.innerWidth < 640 ? "Mobile" : "Desktop"}</div>
             </div>
           `;
+
+          // Ensure currentDirectionsResult is set
+          if (!currentDirectionsResult) {
+            currentDirectionsResult = currentDirections;
+            console.log("Set currentDirectionsResult from renderer");
+          }
 
           // Force re-render by temporarily clearing and re-setting
           directionsRenderer.setDirections(null);
