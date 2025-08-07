@@ -605,6 +605,36 @@
   function startTurnByTurnNavigation() {
     if (!map || !directionsRenderer || !startCoords) return;
 
+    // Check if session isn't started and start it automatically
+    if (sessionStatus === "idle") {
+      // Validate requirements for starting session
+      if (!permissionDetails.accelerometer) {
+        alert(
+          "Motion sensor access is required for pothole detection. Please enable sensors first."
+        );
+        return;
+      }
+
+      if (!permissionDetails.location) {
+        alert(
+          "Location access is required for navigation. Please enable location services first."
+        );
+        return;
+      }
+
+      if (!startCoords || !destinationCoords) {
+        alert(
+          "Please select both start location and destination before starting navigation."
+        );
+        return;
+      }
+
+      // Start the session automatically
+      console.log("Auto-starting session for navigation...");
+      startSession();
+      return; // startSession will call startTurnByTurnNavigation again
+    }
+
     navigationStarted = true;
 
     // If route isn't planned yet, plan it first
@@ -1531,8 +1561,10 @@
     sensorManager.startAccelerometer(handleAccelerometerData);
     sensorManager.startLocationTracking(handleLocationData);
 
-    // Start turn-by-turn navigation
-    startTurnByTurnNavigation();
+    // Start turn-by-turn navigation if route is available
+    if (startCoords && destinationCoords && map) {
+      startTurnByTurnNavigation();
+    }
   }
 
   function stopSession() {
@@ -1668,14 +1700,20 @@
   function addPotholeMarker(event: PotholeEvent) {
     if (!map || !event.location) return;
 
+    // Don't add markers for false positives
+    if (event.userConfirmed === false) return;
+
+    const icon = getPotholeMarkerIcon(event.userConfirmed, event.severity);
+    if (!icon) return; // Don't create marker if icon is null
+
     const marker = new google.maps.Marker({
       position: {
         lat: event.location.latitude,
         lng: event.location.longitude,
       },
       map: map,
-      title: `Pothole Event #${event.id} - ${event.severity.toUpperCase()} severity`,
-      icon: getPotholeMarkerIcon(event.userConfirmed, event.severity),
+      title: `Pothole Event #${event.id} - ${event.userConfirmed ? "CONFIRMED" : "UNCONFIRMED"} ${event.severity.toUpperCase()} severity`,
+      icon: icon,
       zIndex: 1000, // Show above route line
     });
 
@@ -1694,54 +1732,89 @@
   }
 
   function getPotholeMarkerIcon(confirmed: boolean | null, severity: string) {
-    let color = "#FFA500"; // Orange for unconfirmed
-    
-    if (confirmed === true) {
-      // Green shades for confirmed potholes based on severity
-      switch (severity) {
-        case "high": color = "#DC2625"; break;    // Red for high severity confirmed
-        case "medium": color = "#EA580C"; break;  // Orange-red for medium confirmed
-        case "low": color = "#16A34A"; break;     // Green for low confirmed
-        default: color = "#16A34A"; break;
-      }
-    } else if (confirmed === false) {
-      color = "#6B7280"; // Gray for false positives
-    } else {
-      // Yellow/orange shades for unconfirmed based on severity
-      switch (severity) {
-        case "high": color = "#FEF08A"; break;    // Light yellow for high unconfirmed
-        case "medium": color = "#FDE047"; break;  // Yellow for medium unconfirmed
-        case "low": color = "#FBB041"; break;     // Light orange for low unconfirmed
-        default: color = "#FFA500"; break;
-      }
+    // Don't show false positives on the map
+    if (confirmed === false) {
+      return null; // This will hide the marker
     }
 
-    return {
-      path: google.maps.SymbolPath.CIRCLE,
-      fillColor: color,
-      fillOpacity: 0.8,
-      stroke: true,
-      strokeColor: "#FFFFFF",
-      strokeWeight: 2,
-      scale: confirmed === null ? 8 : confirmed ? 10 : 6, // Larger for confirmed, smaller for false positives
-    };
+    let color = "#FFA500"; // Orange for unconfirmed
+    let icon;
+
+    if (confirmed === true) {
+      // Use star icon for confirmed potholes with severity-based colors
+      switch (severity) {
+        case "high":
+          color = "#DC2625";
+          break; // Red for high severity confirmed
+        case "medium":
+          color = "#EA580C";
+          break; // Orange-red for medium confirmed
+        case "low":
+          color = "#16A34A";
+          break; // Green for low confirmed
+        default:
+          color = "#16A34A";
+          break;
+      }
+
+      // Star icon for confirmed potholes
+      icon = {
+        path: "M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z",
+        fillColor: color,
+        fillOpacity: 1.0,
+        strokeColor: "#FFFFFF",
+        strokeWeight: 2,
+        scale: 1.2,
+        anchor: new google.maps.Point(12, 12),
+      };
+    } else {
+      // Circle icon for unconfirmed potholes with severity-based colors
+      switch (severity) {
+        case "high":
+          color = "#FEF08A";
+          break; // Light yellow for high unconfirmed
+        case "medium":
+          color = "#FDE047";
+          break; // Yellow for medium unconfirmed
+        case "low":
+          color = "#FBB041";
+          break; // Light orange for low unconfirmed
+        default:
+          color = "#FFA500";
+          break;
+      }
+
+      // Circle icon for unconfirmed potholes
+      icon = {
+        path: google.maps.SymbolPath.CIRCLE,
+        fillColor: color,
+        fillOpacity: 0.8,
+        stroke: true,
+        strokeColor: "#FFFFFF",
+        strokeWeight: 2,
+        scale: 8,
+      };
+    }
+
+    return icon;
   }
 
   function createPotholeInfoWindowContent(event: PotholeEvent): string {
-    const statusBadge = event.userConfirmed === true
-      ? '<span style="background: #16A34A; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">✓ Confirmed</span>'
-      : event.userConfirmed === false
-      ? '<span style="background: #6B7280; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">✗ False Positive</span>'
-      : '<span style="background: #FFA500; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">? Unconfirmed</span>';
+    const statusBadge =
+      event.userConfirmed === true
+        ? '<span style="background: #16A34A; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">✓ Confirmed</span>'
+        : event.userConfirmed === false
+          ? '<span style="background: #6B7280; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">✗ False Positive</span>'
+          : '<span style="background: #FFA500; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">? Unconfirmed</span>';
 
     const severityBadge = `<span style="background: ${getSeverityBadgeColor(event.severity)}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">${event.severity.toUpperCase()}</span>`;
 
     const force = Math.sqrt(
       event.accelerometer.x ** 2 +
-      event.accelerometer.y ** 2 +
-      event.accelerometer.z ** 2
+        event.accelerometer.y ** 2 +
+        event.accelerometer.z ** 2
     ).toFixed(1);
-    
+
     return `
       <div style="font-family: Arial, sans-serif; max-width: 250px;">
         <div style="margin-bottom: 8px;">
@@ -1753,7 +1826,7 @@
         <div style="font-size: 12px; color: #666;">
           <div><strong>Time:</strong> ${new Date(event.timestamp).toLocaleTimeString()}</div>
           <div><strong>Force:</strong> ${force} m/s²</div>
-          <div><strong>Speed:</strong> ${event.speed ? Math.round(event.speed * 3.6) + ' km/h' : 'N/A'}</div>
+          <div><strong>Speed:</strong> ${event.speed ? Math.round(event.speed * 3.6) + " km/h" : "N/A"}</div>
           <div><strong>Location:</strong> ${event.location.latitude.toFixed(6)}, ${event.location.longitude.toFixed(6)}</div>
         </div>
       </div>
@@ -1762,10 +1835,14 @@
 
   function getSeverityBadgeColor(severity: string): string {
     switch (severity) {
-      case "high": return "#DC2625";
-      case "medium": return "#EA580C";
-      case "low": return "#16A34A";
-      default: return "#6B7280";
+      case "high":
+        return "#DC2625";
+      case "medium":
+        return "#EA580C";
+      case "low":
+        return "#16A34A";
+      default:
+        return "#6B7280";
     }
   }
 
@@ -1776,25 +1853,46 @@
     const marker = potholeMarkers.find((m) => (m as any).eventId === eventId);
 
     if (event && marker) {
+      // If marked as false positive, hide the marker
+      if (event.userConfirmed === false) {
+        marker.setMap(null);
+        // Remove from potholeMarkers array
+        const markerIndex = potholeMarkers.findIndex(
+          (m) => (m as any).eventId === eventId
+        );
+        if (markerIndex > -1) {
+          potholeMarkers.splice(markerIndex, 1);
+        }
+        return;
+      }
+
       // Update marker icon based on new confirmation status
-      marker.setIcon(getPotholeMarkerIcon(event.userConfirmed, event.severity));
+      const newIcon = getPotholeMarkerIcon(event.userConfirmed, event.severity);
+      if (newIcon) {
+        marker.setIcon(newIcon);
 
-      // Update info window content
-      const infoWindow = new google.maps.InfoWindow({
-        content: createPotholeInfoWindowContent(event),
-      });
+        // Update the title
+        marker.setTitle(
+          `Pothole Event #${event.id} - ${event.userConfirmed ? "CONFIRMED" : "UNCONFIRMED"} ${event.severity.toUpperCase()} severity`
+        );
 
-      // Replace the click listener
-      google.maps.event.clearListeners(marker, 'click');
-      marker.addListener("click", () => {
-        infoWindow.open(map, marker);
-      });
+        // Update info window content
+        const infoWindow = new google.maps.InfoWindow({
+          content: createPotholeInfoWindowContent(event),
+        });
+
+        // Replace the click listener
+        google.maps.event.clearListeners(marker, "click");
+        marker.addListener("click", () => {
+          infoWindow.open(map, marker);
+        });
+      }
     }
   }
 
   function clearPotholeMarkers() {
     // Remove all pothole markers from the map
-    potholeMarkers.forEach(marker => {
+    potholeMarkers.forEach((marker) => {
       marker.setMap(null);
     });
     potholeMarkers = [];
@@ -1806,9 +1904,9 @@
     // Clear existing markers first
     clearPotholeMarkers();
 
-    // Add markers for all events in the current session
-    currentSession.events.forEach(event => {
-      if (event.location) {
+    // Add markers for all events in the current session, excluding false positives
+    currentSession.events.forEach((event) => {
+      if (event.location && event.userConfirmed !== false) {
         addPotholeMarker(event);
       }
     });
@@ -2460,6 +2558,10 @@
                     <button
                       on:click={() => {
                         navigationStarted = false;
+                        // Also stop the session when navigation is stopped
+                        if (sessionStatus === "active") {
+                          stopSession();
+                        }
                       }}
                       class="text-white hover:text-gray-200 p-1 rounded touch-manipulation"
                     >
@@ -2501,28 +2603,36 @@
                         clip-rule="evenodd"
                       />
                     </svg>
-                    <h4 class="font-semibold text-gray-700 text-sm">Map Legend</h4>
+                    <h4 class="font-semibold text-gray-700 text-sm">
+                      Map Legend
+                    </h4>
                   </div>
-                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                     <div class="flex items-center">
-                      <div class="w-3 h-3 rounded-full bg-yellow-300 border border-white mr-2"></div>
+                      <div
+                        class="w-3 h-3 rounded-full bg-yellow-300 border border-white mr-2"
+                      ></div>
                       <span class="text-gray-600">Unconfirmed</span>
                     </div>
                     <div class="flex items-center">
-                      <div class="w-3 h-3 rounded-full bg-green-600 border border-white mr-2"></div>
+                      <div
+                        class="w-3 h-3 bg-green-600 mr-2 flex items-center justify-center text-white text-xs"
+                        style="clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"
+                      >
+                        ★
+                      </div>
                       <span class="text-gray-600">Confirmed</span>
                     </div>
                     <div class="flex items-center">
-                      <div class="w-3 h-3 rounded-full bg-gray-500 border border-white mr-2"></div>
-                      <span class="text-gray-600">False Positive</span>
-                    </div>
-                    <div class="flex items-center">
-                      <div class="w-3 h-3 rounded-full bg-blue-500 border border-white mr-2"></div>
+                      <div
+                        class="w-3 h-3 rounded-full bg-blue-500 border border-white mr-2"
+                      ></div>
                       <span class="text-gray-600">Your Location</span>
                     </div>
                   </div>
                   <p class="text-gray-500 text-xs mt-2 italic">
-                    Click on any marker for detailed information
+                    Click on any marker for detailed information. False
+                    positives are hidden from the map.
                   </p>
                 </div>
               {/if}
@@ -2542,7 +2652,7 @@
                   <div class="absolute top-4 left-4 right-4 z-10">
                     <button
                       on:click={startTurnByTurnNavigation}
-                      disabled={directionsLoading}
+                      disabled={directionsLoading || (!permissionDetails.accelerometer || !permissionDetails.location || !startCoords || !destinationCoords)}
                       class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-semibold text-sm shadow-lg flex items-center justify-center transition-colors duration-200"
                     >
                       {#if directionsLoading}
@@ -2562,9 +2672,17 @@
                             clip-rule="evenodd"
                           />
                         </svg>
-                        Start Turn-by-Turn Navigation
+                        {sessionStatus === "idle" ? "Start Navigation & Session" : "Start Turn-by-Turn Navigation"}
                       {/if}
                     </button>
+                    
+                    {#if sessionStatus === "idle" && startCoords && destinationCoords && permissionDetails.accelerometer && permissionDetails.location}
+                      <div class="mt-2 text-center">
+                        <p class="text-white text-xs bg-black bg-opacity-50 rounded px-2 py-1">
+                          🚗 This will start both navigation and pothole detection
+                        </p>
+                      </div>
+                    {/if}
                   </div>
                 {/if}
 
