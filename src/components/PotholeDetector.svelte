@@ -861,57 +861,99 @@
       #directions-panel .adp-summary {
         background: #1a73e8 !important;
         color: white !important;
-        padding: 12px !important;
+        padding: 8px 12px !important;
         border-radius: 8px !important;
         margin-bottom: 8px !important;
         font-weight: 500 !important;
       }
       #directions-panel .adp-substep {
         border-left: 3px solid #1a73e8 !important;
-        padding: 8px 12px !important;
-        margin: 4px 0 !important;
+        padding: 6px 8px !important;
+        margin: 3px 0 !important;
         background: white !important;
         border-radius: 4px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
         cursor: pointer !important;
         transition: background-color 0.2s ease !important;
+        touch-action: manipulation !important;
+        min-height: 44px !important; /* Better touch target on mobile */
+        display: flex !important;
+        align-items: center !important;
       }
-      #directions-panel .adp-substep:hover {
+      #directions-panel .adp-substep:hover,
+      #directions-panel .adp-substep:active {
         background: #f8f9fa !important;
         border-left-color: #0d47a1 !important;
       }
       #directions-panel .adp-maneuver {
         color: #1a73e8 !important;
         font-weight: 600 !important;
-        margin-right: 8px !important;
+        margin-right: 6px !important;
+        flex-shrink: 0 !important;
       }
       #directions-panel .adp-distance {
         color: #5f6368 !important;
-        font-size: 12px !important;
-        float: right !important;
+        font-size: 11px !important;
+        margin-left: auto !important;
+        flex-shrink: 0 !important;
       }
       #directions-panel .adp-duration {
         color: #5f6368 !important;
-        font-size: 12px !important;
+        font-size: 11px !important;
       }
       #directions-panel table {
         width: 100% !important;
         border-collapse: collapse !important;
       }
       #directions-panel td {
-        padding: 8px !important;
+        padding: 6px !important;
         border-bottom: 1px solid #e8eaed !important;
+        vertical-align: middle !important;
       }
       #directions-panel .adp-stepicon {
-        width: 20px !important;
-        height: 20px !important;
-        margin-right: 8px !important;
+        width: 18px !important;
+        height: 18px !important;
+        margin-right: 6px !important;
+        flex-shrink: 0 !important;
       }
       .audio-controls {
         position: absolute !important;
-        top: 10px !important;
-        left: 10px !important;
+        top: 8px !important;
+        left: 8px !important;
         z-index: 1001 !important;
+      }
+      
+      /* Mobile-specific adjustments */
+      @media (max-width: 640px) {
+        #directions-panel .adp-summary {
+          padding: 6px 8px !important;
+          font-size: 12px !important;
+        }
+        #directions-panel .adp-substep {
+          padding: 8px 6px !important;
+          margin: 2px 0 !important;
+          min-height: 48px !important; /* Larger touch targets on mobile */
+        }
+        #directions-panel .adp-maneuver {
+          font-size: 12px !important;
+          margin-right: 4px !important;
+        }
+        #directions-panel .adp-distance,
+        #directions-panel .adp-duration {
+          font-size: 10px !important;
+        }
+        #directions-panel .adp-stepicon {
+          width: 16px !important;
+          height: 16px !important;
+          margin-right: 4px !important;
+        }
+        #directions-panel td {
+          padding: 4px !important;
+        }
+        .audio-controls {
+          top: 4px !important;
+          left: 4px !important;
+        }
       }
     `;
     document.head.appendChild(style);
@@ -971,12 +1013,14 @@
     const audioControlsDiv = document.createElement("div");
     audioControlsDiv.className = "audio-controls";
     audioControlsDiv.innerHTML = `
-      <div style="display: flex; gap: 8px; background: rgba(255,255,255,0.9); padding: 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
-        <button id="speak-all-btn" style="background: #1a73e8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-          🔊 Speak All
+      <div style="display: flex; gap: 4px; background: rgba(255,255,255,0.95); padding: 6px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); backdrop-filter: blur(4px);">
+        <button id="speak-all-btn" style="background: #1a73e8; color: white; border: none; padding: 8px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; touch-action: manipulation; min-height: 36px; display: flex; align-items: center; gap: 4px;">
+          <span style="font-size: 14px;">🔊</span>
+          <span class="button-text">Speak All</span>
         </button>
-        <button id="stop-speech-btn" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-          🔇 Stop
+        <button id="stop-speech-btn" style="background: #dc3545; color: white; border: none; padding: 8px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; touch-action: manipulation; min-height: 36px; display: flex; align-items: center; gap: 4px;">
+          <span style="font-size: 14px;">🔇</span>
+          <span class="button-text">Stop</span>
         </button>
       </div>
     `;
@@ -994,6 +1038,20 @@
     stopSpeechBtn?.addEventListener("click", () => {
       stopSpeech();
     });
+
+    // Add mobile-specific styling
+    const isMobile = window.innerWidth < 640;
+    if (isMobile) {
+      const buttons = audioControlsDiv.querySelectorAll("button");
+      buttons.forEach((button) => {
+        const textSpan = button.querySelector(".button-text");
+        if (textSpan) {
+          textSpan.style.display = "none"; // Hide text on mobile, show only icons
+        }
+        button.style.padding = "8px";
+        button.style.minWidth = "36px";
+      });
+    }
   }
 
   // Speak a single instruction
@@ -2174,17 +2232,17 @@
                   </div>
                 {/if}
 
-                <!-- Turn-by-Turn Directions Panel (Google Maps style) -->
+                <!-- Turn-by-Turn Directions Panel (Google Maps style) - Responsive -->
                 {#if navigationStarted}
                   <div
-                    class="absolute top-4 right-4 w-96 max-h-96 bg-white rounded-lg shadow-2xl overflow-hidden z-10 border border-gray-200"
+                    class="absolute top-2 left-2 right-2 sm:top-4 sm:right-4 sm:left-auto sm:w-96 max-h-[50vh] sm:max-h-96 bg-white rounded-lg shadow-2xl overflow-hidden z-10 border border-gray-200"
                   >
                     <div
-                      class="bg-blue-600 text-white p-4 flex items-center justify-between"
+                      class="bg-blue-600 text-white p-3 sm:p-4 flex items-center justify-between"
                     >
                       <div class="flex items-center">
                         <svg
-                          class="w-5 h-5 mr-2"
+                          class="w-4 h-4 sm:w-5 sm:h-5 mr-2"
                           fill="currentColor"
                           viewBox="0 0 20 20"
                         >
@@ -2194,13 +2252,13 @@
                             clip-rule="evenodd"
                           />
                         </svg>
-                        <h3 class="font-semibold text-sm">Navigation Active</h3>
+                        <h3 class="font-semibold text-xs sm:text-sm">Navigation Active</h3>
                       </div>
                       <button
                         on:click={() => {
                           navigationStarted = false;
                         }}
-                        class="text-white hover:text-gray-200 p-1 rounded"
+                        class="text-white hover:text-gray-200 p-1 rounded touch-manipulation"
                       >
                         <svg
                           class="w-4 h-4"
@@ -2217,7 +2275,7 @@
                     </div>
                     <div
                       id="directions-panel"
-                      class="p-3 text-sm max-h-80 overflow-y-auto bg-gray-50"
+                      class="p-2 sm:p-3 text-xs sm:text-sm max-h-64 sm:max-h-80 overflow-y-auto bg-gray-50"
                       style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"
                     ></div>
                   </div>
