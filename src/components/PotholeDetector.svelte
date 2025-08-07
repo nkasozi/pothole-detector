@@ -79,6 +79,11 @@
     updateCurrentLocationMarker();
   }
 
+  // Update pothole markers when session changes
+  $: if (map && currentSession) {
+    updateAllPotholeMarkers();
+  }
+
   // Initialize map when container is available
   $: if (mapContainer && !map && typeof google !== "undefined") {
     initializeMap();
@@ -1308,47 +1313,6 @@
     }
   }
 
-  // Add pothole marker to the map
-  function addPotholeMarker(event: PotholeEvent) {
-    if (!map || !event.location) return;
-
-    const marker = new google.maps.Marker({
-      position: { lat: event.location.latitude, lng: event.location.longitude },
-      map: map,
-      title: `Pothole (${event.severity})`,
-      icon: {
-        url:
-          "data:image/svg+xml;charset=UTF-8," +
-          encodeURIComponent(`
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="10" cy="10" r="8" fill="#FF4444" stroke="#ffffff" stroke-width="2"/>
-            <text x="10" y="14" text-anchor="middle" fill="white" font-size="12" font-weight="bold">!</text>
-          </svg>
-        `),
-        scaledSize: new google.maps.Size(20, 20),
-        anchor: new google.maps.Point(10, 10),
-      },
-    });
-
-    // Add info window
-    const infoWindow = new google.maps.InfoWindow({
-      content: `
-        <div>
-          <h3>Pothole Detected</h3>
-          <p>Severity: ${event.severity}</p>
-          <p>Speed: ${event.speed ? Math.round(event.speed * 3.6) : "Unknown"} km/h</p>
-          <p>Time: ${new Date(event.timestamp).toLocaleTimeString()}</p>
-        </div>
-      `,
-    });
-
-    marker.addListener("click", () => {
-      infoWindow.open(map, marker);
-    });
-
-    potholeMarkers.push(marker);
-  }
-
   // Get user's current location and prefill start address
   async function getCurrentLocationForStart() {
     // First ensure we have location permissions
@@ -1543,6 +1507,9 @@
     sessionStatus = "active";
     sessionStartTime = Date.now();
 
+    // Clear any existing pothole markers from previous session
+    clearPotholeMarkers();
+
     currentSession = {
       id: generateEventId(),
       startTime: sessionStartTime,
@@ -1697,6 +1664,156 @@
     lastLocation = location;
   }
 
+  // Pothole marker management functions
+  function addPotholeMarker(event: PotholeEvent) {
+    if (!map || !event.location) return;
+
+    const marker = new google.maps.Marker({
+      position: {
+        lat: event.location.latitude,
+        lng: event.location.longitude,
+      },
+      map: map,
+      title: `Pothole Event #${event.id} - ${event.severity.toUpperCase()} severity`,
+      icon: getPotholeMarkerIcon(event.userConfirmed, event.severity),
+      zIndex: 1000, // Show above route line
+    });
+
+    // Add info window with event details
+    const infoWindow = new google.maps.InfoWindow({
+      content: createPotholeInfoWindowContent(event),
+    });
+
+    marker.addListener("click", () => {
+      infoWindow.open(map, marker);
+    });
+
+    // Store marker with event ID for later updates
+    (marker as any).eventId = event.id;
+    potholeMarkers.push(marker);
+  }
+
+  function getPotholeMarkerIcon(confirmed: boolean | null, severity: string) {
+    let color = "#FFA500"; // Orange for unconfirmed
+    
+    if (confirmed === true) {
+      // Green shades for confirmed potholes based on severity
+      switch (severity) {
+        case "high": color = "#DC2625"; break;    // Red for high severity confirmed
+        case "medium": color = "#EA580C"; break;  // Orange-red for medium confirmed
+        case "low": color = "#16A34A"; break;     // Green for low confirmed
+        default: color = "#16A34A"; break;
+      }
+    } else if (confirmed === false) {
+      color = "#6B7280"; // Gray for false positives
+    } else {
+      // Yellow/orange shades for unconfirmed based on severity
+      switch (severity) {
+        case "high": color = "#FEF08A"; break;    // Light yellow for high unconfirmed
+        case "medium": color = "#FDE047"; break;  // Yellow for medium unconfirmed
+        case "low": color = "#FBB041"; break;     // Light orange for low unconfirmed
+        default: color = "#FFA500"; break;
+      }
+    }
+
+    return {
+      path: google.maps.SymbolPath.CIRCLE,
+      fillColor: color,
+      fillOpacity: 0.8,
+      stroke: true,
+      strokeColor: "#FFFFFF",
+      strokeWeight: 2,
+      scale: confirmed === null ? 8 : confirmed ? 10 : 6, // Larger for confirmed, smaller for false positives
+    };
+  }
+
+  function createPotholeInfoWindowContent(event: PotholeEvent): string {
+    const statusBadge = event.userConfirmed === true
+      ? '<span style="background: #16A34A; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">✓ Confirmed</span>'
+      : event.userConfirmed === false
+      ? '<span style="background: #6B7280; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">✗ False Positive</span>'
+      : '<span style="background: #FFA500; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">? Unconfirmed</span>';
+
+    const severityBadge = `<span style="background: ${getSeverityBadgeColor(event.severity)}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">${event.severity.toUpperCase()}</span>`;
+
+    const force = Math.sqrt(
+      event.accelerometer.x ** 2 +
+      event.accelerometer.y ** 2 +
+      event.accelerometer.z ** 2
+    ).toFixed(1);
+    
+    return `
+      <div style="font-family: Arial, sans-serif; max-width: 250px;">
+        <div style="margin-bottom: 8px;">
+          <strong>Pothole Event #${event.id}</strong>
+        </div>
+        <div style="margin-bottom: 8px;">
+          ${statusBadge} ${severityBadge}
+        </div>
+        <div style="font-size: 12px; color: #666;">
+          <div><strong>Time:</strong> ${new Date(event.timestamp).toLocaleTimeString()}</div>
+          <div><strong>Force:</strong> ${force} m/s²</div>
+          <div><strong>Speed:</strong> ${event.speed ? Math.round(event.speed * 3.6) + ' km/h' : 'N/A'}</div>
+          <div><strong>Location:</strong> ${event.location.latitude.toFixed(6)}, ${event.location.longitude.toFixed(6)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function getSeverityBadgeColor(severity: string): string {
+    switch (severity) {
+      case "high": return "#DC2625";
+      case "medium": return "#EA580C";
+      case "low": return "#16A34A";
+      default: return "#6B7280";
+    }
+  }
+
+  function updatePotholeMarker(eventId: string) {
+    if (!currentSession) return;
+
+    const event = currentSession.events.find((e) => e.id === eventId);
+    const marker = potholeMarkers.find((m) => (m as any).eventId === eventId);
+
+    if (event && marker) {
+      // Update marker icon based on new confirmation status
+      marker.setIcon(getPotholeMarkerIcon(event.userConfirmed, event.severity));
+
+      // Update info window content
+      const infoWindow = new google.maps.InfoWindow({
+        content: createPotholeInfoWindowContent(event),
+      });
+
+      // Replace the click listener
+      google.maps.event.clearListeners(marker, 'click');
+      marker.addListener("click", () => {
+        infoWindow.open(map, marker);
+      });
+    }
+  }
+
+  function clearPotholeMarkers() {
+    // Remove all pothole markers from the map
+    potholeMarkers.forEach(marker => {
+      marker.setMap(null);
+    });
+    potholeMarkers = [];
+  }
+
+  function updateAllPotholeMarkers() {
+    if (!map || !currentSession) return;
+
+    // Clear existing markers first
+    clearPotholeMarkers();
+
+    // Add markers for all events in the current session
+    currentSession.events.forEach(event => {
+      if (event.location) {
+        addPotholeMarker(event);
+      }
+    });
+  }
+
   function confirmPothole(eventId: string) {
     if (!currentSession) return;
 
@@ -1707,6 +1824,8 @@
       confirmedPotholes++;
       // Trigger reactivity
       currentSession.events = [...currentSession.events];
+      // Update the marker on the map
+      updatePotholeMarker(eventId);
     }
   }
 
@@ -1720,6 +1839,8 @@
       falsePositives++;
       // Trigger reactivity
       currentSession.events = [...currentSession.events];
+      // Update the marker on the map
+      updatePotholeMarker(eventId);
     }
   }
 
@@ -2360,6 +2481,49 @@
                     class="p-2 sm:p-3 text-xs sm:text-sm max-h-64 sm:max-h-80 overflow-y-auto bg-gray-50"
                     style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"
                   ></div>
+                </div>
+              {/if}
+
+              <!-- Pothole Markers Legend - Shows when session is active -->
+              {#if sessionStatus === "active"}
+                <div
+                  class="w-full bg-gray-50 rounded-lg border border-gray-200 mb-4 p-3"
+                >
+                  <div class="flex items-center mb-2">
+                    <svg
+                      class="w-4 h-4 mr-2 text-gray-600"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                    <h4 class="font-semibold text-gray-700 text-sm">Map Legend</h4>
+                  </div>
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <div class="flex items-center">
+                      <div class="w-3 h-3 rounded-full bg-yellow-300 border border-white mr-2"></div>
+                      <span class="text-gray-600">Unconfirmed</span>
+                    </div>
+                    <div class="flex items-center">
+                      <div class="w-3 h-3 rounded-full bg-green-600 border border-white mr-2"></div>
+                      <span class="text-gray-600">Confirmed</span>
+                    </div>
+                    <div class="flex items-center">
+                      <div class="w-3 h-3 rounded-full bg-gray-500 border border-white mr-2"></div>
+                      <span class="text-gray-600">False Positive</span>
+                    </div>
+                    <div class="flex items-center">
+                      <div class="w-3 h-3 rounded-full bg-blue-500 border border-white mr-2"></div>
+                      <span class="text-gray-600">Your Location</span>
+                    </div>
+                  </div>
+                  <p class="text-gray-500 text-xs mt-2 italic">
+                    Click on any marker for detailed information
+                  </p>
                 </div>
               {/if}
 
