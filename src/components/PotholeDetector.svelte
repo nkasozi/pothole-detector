@@ -649,16 +649,6 @@
           currentDirections.routes.length > 0
         ) {
           console.log("Re-applying directions to panel...");
-          // Show status in panel with more details
-          directionsPanel.innerHTML = `
-            <div class="p-4 text-blue-600 bg-blue-50 rounded">
-              <div class="font-medium">📍 Loading Turn-by-Turn Directions...</div>
-              <div class="text-sm mt-1">Routes found: ${currentDirections.routes.length}</div>
-              <div class="text-sm">Steps: ${currentDirections.routes[0]?.legs?.[0]?.steps?.length || "Unknown"}</div>
-              <div class="text-sm">Current Directions Result: ${currentDirectionsResult ? "Available" : "Missing"}</div>
-              <div class="text-xs mt-2 text-gray-600">Device: ${window.innerWidth < 640 ? "Mobile" : "Desktop"}</div>
-            </div>
-          `;
 
           // Ensure currentDirectionsResult is set
           if (!currentDirectionsResult) {
@@ -666,116 +656,27 @@
             console.log("Set currentDirectionsResult from renderer");
           }
 
-          // Force re-render by temporarily clearing and re-setting
-          directionsRenderer.setDirections(null);
+          // Apply directions to the panel
+          directionsRenderer.setDirections(currentDirections);
+
+          // Style the directions panel and setup interactions
           setTimeout(() => {
-            directionsRenderer.setDirections(currentDirections);
-
-            // Additional verification and retry for mobile
-            setTimeout(() => {
-              if (
-                directionsPanel.innerHTML.trim() === "" ||
-                directionsPanel.innerHTML.includes(
-                  "Directions will appear here"
-                ) ||
-                directionsPanel.innerHTML.includes("Loading Turn-by-Turn")
-              ) {
-                console.log(
-                  "Directions still not showing, forcing manual render..."
-                );
-
-                // Show detailed error info
-                directionsPanel.innerHTML = `
-                  <div class="p-4 text-orange-600 bg-orange-50 rounded">
-                    <div class="font-medium">⚠️ Directions Loading Issue</div>
-                    <div class="text-sm mt-2 space-y-1">
-                      <div>• Device: ${window.innerWidth < 640 ? "Mobile" : "Desktop"} (${window.innerWidth}px)</div>
-                      <div>• Routes: ${currentDirections.routes?.length || 0}</div>
-                      <div>• Steps: ${currentDirections.routes?.[0]?.legs?.[0]?.steps?.length || 0}</div>
-                      <div>• Panel ID: ${directionsPanel.id}</div>
-                      <div>• Renderer: ${directionsRenderer ? "Available" : "Missing"}</div>
-                      <div>• Map: ${map ? "Available" : "Missing"}</div>
-                    </div>
-                    <div class="text-xs mt-3 text-gray-600">Retrying in 3 seconds...</div>
-                  </div>
-                `;
-
-                // Try one more time with a different approach
-                setTimeout(() => {
-                  directionsRenderer.setDirections(currentDirections);
-
-                  // Final check after another attempt
-                  setTimeout(() => {
-                    const steps =
-                      directionsPanel.querySelectorAll(".adp-substep");
-                    if (steps.length === 0) {
-                      directionsPanel.innerHTML = `
-                        <div class="p-4 text-red-600 bg-red-50 rounded">
-                          <div class="font-medium">❌ Mobile Compatibility Issue</div>
-                          <div class="text-sm mt-2 space-y-1">
-                            <div>• Google Maps may not render directions on this mobile browser</div>
-                            <div>• Route is planned and visible on map</div>
-                            <div>• Try refreshing or using desktop browser</div>
-                            <div class="mt-3 p-2 bg-white rounded text-xs">
-                              <strong>Debug Info:</strong><br>
-                              Browser: ${navigator.userAgent.substring(0, 50)}...<br>
-                              Steps found: ${steps.length}<br>
-                              Panel content length: ${directionsPanel.innerHTML.length}
-                            </div>
-                          </div>
-                        </div>
-                      `;
-                    }
-                  }, 2000);
-                }, 3000);
-              }
-            }, 1000);
-          }, 100); // Increased delay for mobile
+            styleDirectionsPanel(directionsPanel);
+            setupInteractiveDirections(directionsPanel);
+          }, 300);
         } else {
           console.log("No current directions found, may need to re-plan route");
-          directionsPanel.innerHTML = `
-            <div class="p-4 text-yellow-600 bg-yellow-50 rounded">
-              <div class="font-medium">🔄 Route Planning Required</div>
-              <div class="text-sm mt-2">
-                <div>• Current directions: ${currentDirections ? "Available" : "Missing"}</div>
-                <div>• Routes: ${currentDirections?.routes?.length || 0}</div>
-                <div>• Device: ${window.innerWidth < 640 ? "Mobile" : "Desktop"}</div>
-                <div>• Attempting to re-plan route...</div>
-              </div>
-            </div>
-          `;
         }
-
-        // Style the directions panel to look like Google Maps
-        setTimeout(() => {
-          styleDirectionsPanel(directionsPanel);
-          setupInteractiveDirections(directionsPanel);
-        }, 300); // Increased delay for mobile
       } else {
         console.error("Directions panel not found in DOM, retrying...");
-        // Show retry message in the panel area if we can find it another way
+        // Simple retry mechanism
         const retryCount = (setupDirectionsPanel as any).retryCount || 0;
         (setupDirectionsPanel as any).retryCount = retryCount + 1;
 
-        if (retryCount < 5) {
-          // Retry mechanism for mobile devices
+        if (retryCount < 3) {
           setTimeout(setupDirectionsPanel, 200);
         } else {
-          // If we still can't find the panel after 5 retries, show an error
-          const fallbackPanel = document.querySelector(
-            '[id*="directions"]'
-          ) as HTMLElement;
-          if (fallbackPanel) {
-            fallbackPanel.innerHTML = `
-              <div class="p-4 text-red-600 bg-red-50 rounded">
-                <div class="font-medium">❌ Panel Setup Failed</div>
-                <div class="text-sm mt-2">
-                  Unable to locate directions panel after ${retryCount} attempts.<br>
-                  This may be a mobile browser compatibility issue.
-                </div>
-              </div>
-            `;
-          }
+          console.error("Failed to find directions panel after retries");
         }
       }
     };
@@ -1010,8 +911,6 @@
         transition: background-color 0.2s ease !important;
         touch-action: manipulation !important;
         min-height: 44px !important; /* Better touch target on mobile */
-        display: flex !important;
-        align-items: center !important;
       }
       #directions-panel .adp-substep:hover,
       #directions-panel .adp-substep:active {
@@ -1022,13 +921,11 @@
         color: #1a73e8 !important;
         font-weight: 600 !important;
         margin-right: 6px !important;
-        flex-shrink: 0 !important;
       }
       #directions-panel .adp-distance {
         color: #5f6368 !important;
         font-size: 11px !important;
-        margin-left: auto !important;
-        flex-shrink: 0 !important;
+        text-align: right !important;
       }
       #directions-panel .adp-duration {
         color: #5f6368 !important;
@@ -1037,17 +934,29 @@
       #directions-panel table {
         width: 100% !important;
         border-collapse: collapse !important;
+        table-layout: auto !important;
       }
       #directions-panel td {
         padding: 6px !important;
         border-bottom: 1px solid #e8eaed !important;
         vertical-align: middle !important;
+        white-space: nowrap !important;
+      }
+      #directions-panel td:first-child {
+        width: auto !important;
+        white-space: normal !important;
+        word-wrap: break-word !important;
+      }
+      #directions-panel td:last-child {
+        width: 80px !important;
+        text-align: right !important;
+        white-space: nowrap !important;
       }
       #directions-panel .adp-stepicon {
         width: 18px !important;
         height: 18px !important;
         margin-right: 6px !important;
-        flex-shrink: 0 !important;
+        vertical-align: middle !important;
       }
       .audio-controls {
         position: absolute !important;
@@ -1083,6 +992,9 @@
         #directions-panel td {
           padding: 4px !important;
         }
+        #directions-panel td:last-child {
+          width: 60px !important;
+        }
         .audio-controls {
           top: 4px !important;
           left: 4px !important;
@@ -1095,17 +1007,7 @@
   // Setup interactive directions - click to show on map and audio features
   function setupInteractiveDirections(panel: HTMLElement) {
     if (!currentDirectionsResult || !map) {
-      // Show error if missing dependencies
-      panel.innerHTML = `
-        <div class="p-4 text-red-600 bg-red-50 rounded">
-          <div class="font-medium">❌ Setup Error</div>
-          <div class="text-sm mt-2">
-            • Directions Result: ${currentDirectionsResult ? "Available" : "Missing"}<br>
-            • Map: ${map ? "Available" : "Missing"}<br>
-            • Device: ${window.innerWidth < 640 ? "Mobile" : "Desktop"}
-          </div>
-        </div>
-      `;
+      console.log("Missing dependencies for interactive directions");
       return;
     }
 
@@ -1116,156 +1018,116 @@
 
     // Check if we're on mobile
     const isMobile = window.innerWidth < 640;
-    const waitTime = isMobile ? 800 : 500; // Longer wait on mobile
 
-    // Show loading message with debug info
-    panel.innerHTML = `
-      <div class="p-4 text-blue-600 bg-blue-50 rounded">
-        <div class="font-medium">🔄 Setting up Interactive Features...</div>
-        <div class="text-sm mt-2">
-          • Platform: ${isMobile ? "Mobile" : "Desktop"}<br>
-          • Wait time: ${waitTime}ms<br>
-          • Speech: ${speechSynthesis ? "Available" : "Not available"}
-        </div>
-      </div>
-    `;
+    console.log("Setting up interactive directions...");
 
-    // Wait for Google Maps to render the directions content
-    setTimeout(() => {
+    // Function to check and setup interactions without destroying content
+    function checkAndSetupInteractions() {
       const steps = panel.querySelectorAll(".adp-substep");
       const route = currentDirectionsResult.routes[0];
 
+      // Check if Google Maps has already rendered directions content
+      const hasGoogleContent =
+        panel.querySelector(".adp-summary") ||
+        panel.querySelector(".adp-substep") ||
+        panel.querySelector(".adp-directions") ||
+        panel.querySelector("table");
+
       console.log(
-        `Found ${steps.length} direction steps on ${isMobile ? "mobile" : "desktop"}`
+        `Found ${steps.length} direction steps, Google content: ${hasGoogleContent ? "Yes" : "No"}`
       );
 
-      // Update panel with step count info
-      panel.innerHTML = `
-        <div class="p-4 text-purple-600 bg-purple-50 rounded">
-          <div class="font-medium">🔍 Analyzing Directions...</div>
-          <div class="text-sm mt-2">
-            • Steps found: ${steps.length}<br>
-            • Route available: ${route ? "Yes" : "No"}<br>
-            • Legs: ${route?.legs?.length || 0}<br>
-            • Steps in route: ${route?.legs?.[0]?.steps?.length || 0}
-          </div>
-        </div>
-      `;
-
-      // If no steps found on mobile, try to force a re-render
-      if (steps.length === 0 && isMobile) {
+      if (hasGoogleContent && steps.length > 0 && route?.legs?.[0]?.steps) {
+        // Success! Directions are already rendered, just add interactions
         console.log(
-          "No steps found on mobile, attempting to re-render directions..."
+          "✅ Directions rendered, adding interactions without replacing content"
         );
 
-        panel.innerHTML = `
-          <div class="p-4 text-orange-600 bg-orange-50 rounded">
-            <div class="font-medium">⚠️ Retrying Mobile Render...</div>
-            <div class="text-sm mt-2">
-              No direction steps detected. Attempting alternative rendering...<br>
-              This may take a few seconds on mobile devices.
-            </div>
-          </div>
-        `;
-
-        const currentDirections = directionsRenderer.getDirections();
-        if (currentDirections) {
-          directionsRenderer.setDirections(null);
-          setTimeout(() => {
-            directionsRenderer.setDirections(currentDirections);
-            // Recursive call to try again
-            setTimeout(() => setupInteractiveDirections(panel), 500);
-          }, 100);
-          return;
-        }
-      }
-
-      if (route && route.legs && route.legs[0] && route.legs[0].steps) {
         const routeSteps = route.legs[0].steps;
 
-        if (steps.length > 0) {
-          // Success! Show that we're setting up interactions
-          panel.innerHTML = `
-            <div class="p-4 text-green-600 bg-green-50 rounded">
-              <div class="font-medium">✅ Interactive Directions Ready!</div>
-              <div class="text-sm mt-2">
-                • ${steps.length} clickable direction steps<br>
-                • Audio controls available<br>
-                • Tap any step to center map and hear audio
-              </div>
-            </div>
-          `;
+        steps.forEach((stepElement, index) => {
+          if (index < routeSteps.length) {
+            const step = routeSteps[index];
 
-          steps.forEach((stepElement, index) => {
-            if (index < routeSteps.length) {
-              const step = routeSteps[index];
-
-              // Add click handler to center map on this step
-              stepElement.addEventListener("click", () => {
-                if (step.start_location) {
-                  map.setCenter({
-                    lat: step.start_location.lat(),
-                    lng: step.start_location.lng(),
-                  });
-                  map.setZoom(18); // Close zoom for detailed view
-
-                  // Speak the instruction
-                  speakInstruction(step.instructions);
-                }
-              });
-
-              // Add mobile-friendly touch handling
-              if (isMobile) {
-                stepElement.addEventListener("touchstart", (e) => {
-                  e.preventDefault(); // Prevent zoom on touch
-                  stepElement.click();
+            // Add click handler to center map on this step
+            stepElement.addEventListener("click", () => {
+              if (step.start_location) {
+                map.setCenter({
+                  lat: step.start_location.lat(),
+                  lng: step.start_location.lng(),
                 });
-              }
+                map.setZoom(18);
 
-              // Add hover effect and tooltip
-              stepElement.title =
-                "Click to view this step on map and hear audio";
-              stepElement.style.cursor = "pointer";
+                // Speak the instruction
+                speakInstruction(step.instructions);
+              }
+            });
+
+            // Add mobile-friendly touch handling
+            if (isMobile) {
+              stepElement.addEventListener("touchstart", () => {
+                stepElement.style.backgroundColor = "#f8f9fa";
+              });
+              stepElement.addEventListener("touchend", () => {
+                setTimeout(() => {
+                  stepElement.style.backgroundColor = "";
+                }, 150);
+              });
             }
-          });
-        } else {
-          // Still no steps after all attempts
-          panel.innerHTML = `
-            <div class="p-4 text-red-600 bg-red-50 rounded">
-              <div class="font-medium">❌ Mobile Browser Limitation</div>
-              <div class="text-sm mt-2">
-                Google Maps directions are not rendering properly on this mobile browser.<br><br>
-                <strong>Available alternatives:</strong><br>
-                • Route is visible on the map<br>
-                • Navigation markers are displayed<br>
-                • Try rotating device or refreshing page<br><br>
-                <em>This is a known limitation with some mobile browsers and Google Maps integration.</em>
-              </div>
-            </div>
-          `;
-        }
-      } else {
-        panel.innerHTML = `
-          <div class="p-4 text-yellow-600 bg-yellow-50 rounded">
-            <div class="font-medium">⚠️ Route Data Issue</div>
-            <div class="text-sm mt-2">
-              Route structure is incomplete:<br>
-              • Route: ${route ? "Available" : "Missing"}<br>
-              • Legs: ${route?.legs ? "Available" : "Missing"}<br>
-              • Steps: ${route?.legs?.[0]?.steps ? "Available" : "Missing"}
-            </div>
-          </div>
-        `;
+
+            // Add hover effect and tooltip
+            stepElement.title = "Click to view this step on map and hear audio";
+            stepElement.style.cursor = "pointer";
+          }
+        });
+
+        // Add audio controls without replacing directions content
+        addAudioControls(panel);
+
+        console.log("✅ Interactive features setup complete");
+        return true; // Success
       }
 
-      // Add audio controls to the panel
+      // If no Google content yet, wait a bit more (but don't replace content)
+      if (!hasGoogleContent) {
+        console.log("⏳ No Google Maps content yet, waiting...");
+        return false; // Wait more
+      }
+
+      // Has some content but no interactive steps - this is okay for mobile
+      console.log("📱 Partial content detected (mobile browser limitation)");
       addAudioControls(panel);
-    }, waitTime); // Increased wait time for mobile
+      return true; // Accept as complete
+    }
+
+    // Try immediate setup first
+    if (checkAndSetupInteractions()) {
+      return; // Success
+    }
+
+    // If not ready yet, wait and try again (but only once to avoid loops)
+    setTimeout(
+      () => {
+        if (!checkAndSetupInteractions()) {
+          console.log(
+            "⚠️ Directions setup timeout - proceeding with available content"
+          );
+          addAudioControls(panel);
+        }
+      },
+      isMobile ? 600 : 300
+    );
   }
 
   // Add audio controls to the directions panel
   function addAudioControls(panel: HTMLElement) {
     if (!speechSynthesis) return;
+
+    // Check if audio controls already exist to prevent duplicates
+    if (panel.querySelector(".audio-controls")) {
+      console.log("Audio controls already exist, skipping...");
+      return;
+    }
 
     const audioControlsDiv = document.createElement("div");
     audioControlsDiv.className = "audio-controls";
@@ -1309,6 +1171,8 @@
         button.style.minWidth = "36px";
       });
     }
+
+    console.log("✅ Audio controls added successfully");
   }
 
   // Speak a single instruction
