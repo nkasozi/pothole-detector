@@ -2312,6 +2312,57 @@
                 📍 Interactive Navigation Map
               </div>
 
+              <!-- Turn-by-Turn Directions Panel - Standalone Section Above Map -->
+              {#if navigationStarted}
+                <div
+                  class="w-full bg-white rounded-lg shadow-2xl overflow-hidden mb-4 border border-gray-200"
+                >
+                  <div
+                    class="bg-blue-600 text-white p-3 sm:p-4 flex items-center justify-between"
+                  >
+                    <div class="flex items-center">
+                      <svg
+                        class="w-4 h-4 sm:w-5 sm:h-5 mr-2"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                      <h3 class="font-semibold text-xs sm:text-sm">
+                        Navigation Active
+                      </h3>
+                    </div>
+                    <button
+                      on:click={() => {
+                        navigationStarted = false;
+                      }}
+                      class="text-white hover:text-gray-200 p-1 rounded touch-manipulation"
+                    >
+                      <svg
+                        class="w-4 h-4"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  <div
+                    id="directions-panel"
+                    class="p-2 sm:p-3 text-xs sm:text-sm max-h-64 sm:max-h-80 overflow-y-auto bg-gray-50"
+                    style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"
+                  ></div>
+                </div>
+              {/if}
+
               <!-- Interactive Google Map Container -->
               <div
                 class="relative w-full h-[32rem] lg:h-[40rem] bg-gray-800 rounded-lg mb-4 border border-gray-600"
@@ -2350,57 +2401,6 @@
                         Start Turn-by-Turn Navigation
                       {/if}
                     </button>
-                  </div>
-                {/if}
-
-                <!-- Turn-by-Turn Directions Panel (Google Maps style) - Responsive -->
-                {#if navigationStarted}
-                  <div
-                    class="absolute top-2 left-2 right-2 sm:top-4 sm:right-4 sm:left-auto sm:w-96 max-h-[50vh] sm:max-h-96 bg-white rounded-lg shadow-2xl overflow-hidden z-10 border border-gray-200"
-                  >
-                    <div
-                      class="bg-blue-600 text-white p-3 sm:p-4 flex items-center justify-between"
-                    >
-                      <div class="flex items-center">
-                        <svg
-                          class="w-4 h-4 sm:w-5 sm:h-5 mr-2"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path
-                            fill-rule="evenodd"
-                            d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6z"
-                            clip-rule="evenodd"
-                          />
-                        </svg>
-                        <h3 class="font-semibold text-xs sm:text-sm">
-                          Navigation Active
-                        </h3>
-                      </div>
-                      <button
-                        on:click={() => {
-                          navigationStarted = false;
-                        }}
-                        class="text-white hover:text-gray-200 p-1 rounded touch-manipulation"
-                      >
-                        <svg
-                          class="w-4 h-4"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path
-                            fill-rule="evenodd"
-                            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                            clip-rule="evenodd"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                    <div
-                      id="directions-panel"
-                      class="p-2 sm:p-3 text-xs sm:text-sm max-h-64 sm:max-h-80 overflow-y-auto bg-gray-50"
-                      style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"
-                    ></div>
                   </div>
                 {/if}
 
