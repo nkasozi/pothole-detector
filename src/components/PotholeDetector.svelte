@@ -2089,9 +2089,11 @@
 
     <!-- Navigation & Maps with Google Places API -->
     <div
-      class="p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-4 border-blue-500"
+      class="p-2 sm:p-4 lg:p-6 bg-gradient-to-br from-gray-800 to-gray-900 border-4 border-blue-500"
     >
-      <h2 class="text-xl font-bold mb-6 text-white flex items-center">
+      <h2
+        class="text-xl font-bold mb-4 sm:mb-6 text-white flex items-center px-2 sm:px-0"
+      >
         <svg
           class="w-6 h-6 mr-2 text-blue-400"
           fill="currentColor"
@@ -2107,7 +2109,7 @@
       </h2>
 
       <div
-        class="bg-gray-700 bg-opacity-60 backdrop-blur-sm rounded-xl p-4 border border-gray-600 shadow-lg space-y-4 mb-4"
+        class="bg-gray-700 bg-opacity-60 backdrop-blur-sm rounded-lg sm:rounded-xl p-3 sm:p-4 border border-gray-600 shadow-lg space-y-4 mb-4 mx-0"
       >
         <!-- Current Location Status -->
         {#if currentLocation}
@@ -2652,7 +2654,11 @@
                   <div class="absolute top-4 left-4 right-4 z-10">
                     <button
                       on:click={startTurnByTurnNavigation}
-                      disabled={directionsLoading || (!permissionDetails.accelerometer || !permissionDetails.location || !startCoords || !destinationCoords)}
+                      disabled={directionsLoading ||
+                        !permissionDetails.accelerometer ||
+                        !permissionDetails.location ||
+                        !startCoords ||
+                        !destinationCoords}
                       class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-semibold text-sm shadow-lg flex items-center justify-center transition-colors duration-200"
                     >
                       {#if directionsLoading}
@@ -2672,14 +2678,19 @@
                             clip-rule="evenodd"
                           />
                         </svg>
-                        {sessionStatus === "idle" ? "Start Navigation & Session" : "Start Turn-by-Turn Navigation"}
+                        {sessionStatus === "idle"
+                          ? "Start Navigation & Session"
+                          : "Start Turn-by-Turn Navigation"}
                       {/if}
                     </button>
-                    
+
                     {#if sessionStatus === "idle" && startCoords && destinationCoords && permissionDetails.accelerometer && permissionDetails.location}
                       <div class="mt-2 text-center">
-                        <p class="text-white text-xs bg-black bg-opacity-50 rounded px-2 py-1">
-                          🚗 This will start both navigation and pothole detection
+                        <p
+                          class="text-white text-xs bg-black bg-opacity-50 rounded px-2 py-1"
+                        >
+                          🚗 This will start both navigation and pothole
+                          detection
                         </p>
                       </div>
                     {/if}
