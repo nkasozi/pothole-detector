@@ -609,8 +609,8 @@
       return; // planRoute will call this function again when done
     }
 
-    // Wait for the panel to be rendered in the DOM
-    setTimeout(() => {
+    // Wait for the panel to be rendered in the DOM with more retries for mobile
+    const setupDirectionsPanel = () => {
       const directionsPanel = document.getElementById("directions-panel");
       if (directionsPanel) {
         console.log("Setting directions panel...");
@@ -633,7 +633,22 @@
           directionsRenderer.setDirections(null);
           setTimeout(() => {
             directionsRenderer.setDirections(currentDirections);
-          }, 50);
+
+            // Additional verification and retry for mobile
+            setTimeout(() => {
+              if (
+                directionsPanel.innerHTML.trim() === "" ||
+                directionsPanel.innerHTML.includes(
+                  "Directions will appear here"
+                )
+              ) {
+                console.log(
+                  "Directions still not showing, forcing manual render..."
+                );
+                directionsRenderer.setDirections(currentDirections);
+              }
+            }, 1000);
+          }, 100); // Increased delay for mobile
         } else {
           console.log("No current directions found, may need to re-plan route");
           directionsPanel.innerHTML =
@@ -644,11 +659,16 @@
         setTimeout(() => {
           styleDirectionsPanel(directionsPanel);
           setupInteractiveDirections(directionsPanel);
-        }, 200);
+        }, 300); // Increased delay for mobile
       } else {
-        console.error("Directions panel not found in DOM");
+        console.error("Directions panel not found in DOM, retrying...");
+        // Retry mechanism for mobile devices
+        setTimeout(setupDirectionsPanel, 200);
       }
-    }, 100); // Wait for Svelte to render the panel
+    };
+
+    // Start the setup with initial delay
+    setTimeout(setupDirectionsPanel, 150); // Increased initial delay for mobile
 
     // Configure DirectionsRenderer for navigation mode
     directionsRenderer.setOptions({
@@ -922,7 +942,7 @@
         left: 8px !important;
         z-index: 1001 !important;
       }
-      
+
       /* Mobile-specific adjustments */
       @media (max-width: 640px) {
         #directions-panel .adp-summary {
@@ -968,10 +988,35 @@
       speechSynthesis = window.speechSynthesis;
     }
 
+    // Check if we're on mobile
+    const isMobile = window.innerWidth < 640;
+    const waitTime = isMobile ? 800 : 500; // Longer wait on mobile
+
     // Wait for Google Maps to render the directions content
     setTimeout(() => {
       const steps = panel.querySelectorAll(".adp-substep");
       const route = currentDirectionsResult.routes[0];
+
+      console.log(
+        `Found ${steps.length} direction steps on ${isMobile ? "mobile" : "desktop"}`
+      );
+
+      // If no steps found on mobile, try to force a re-render
+      if (steps.length === 0 && isMobile) {
+        console.log(
+          "No steps found on mobile, attempting to re-render directions..."
+        );
+        const currentDirections = directionsRenderer.getDirections();
+        if (currentDirections) {
+          directionsRenderer.setDirections(null);
+          setTimeout(() => {
+            directionsRenderer.setDirections(currentDirections);
+            // Recursive call to try again
+            setTimeout(() => setupInteractiveDirections(panel), 500);
+          }, 100);
+          return;
+        }
+      }
 
       if (route && route.legs && route.legs[0] && route.legs[0].steps) {
         const routeSteps = route.legs[0].steps;
@@ -994,6 +1039,14 @@
               }
             });
 
+            // Add mobile-friendly touch handling
+            if (isMobile) {
+              stepElement.addEventListener("touchstart", (e) => {
+                e.preventDefault(); // Prevent zoom on touch
+                stepElement.click();
+              });
+            }
+
             // Add hover effect and tooltip
             stepElement.title = "Click to view this step on map and hear audio";
             stepElement.style.cursor = "pointer";
@@ -1003,7 +1056,7 @@
 
       // Add audio controls to the panel
       addAudioControls(panel);
-    }, 500); // Wait for Google to populate the directions
+    }, waitTime); // Increased wait time for mobile
   }
 
   // Add audio controls to the directions panel
@@ -2252,7 +2305,9 @@
                             clip-rule="evenodd"
                           />
                         </svg>
-                        <h3 class="font-semibold text-xs sm:text-sm">Navigation Active</h3>
+                        <h3 class="font-semibold text-xs sm:text-sm">
+                          Navigation Active
+                        </h3>
                       </div>
                       <button
                         on:click={() => {
